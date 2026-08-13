@@ -46,6 +46,8 @@ final class LibraryStore: ObservableObject {
     private var cacheObserverReciterIDs: [String: String] = [:]
     private var cacheOperationsStarting: Set<String> = []
     private var knownTrackReciterIDs: [String: String] = [:]
+    private var tracksByReciter: [String: [Track]] = [:]
+    private var cacheRefreshGeneration: UInt64 = 0
     private var preferencesCancellable: AnyCancellable?
     private var manualOfflineCancellable: AnyCancellable?
 
@@ -74,7 +76,9 @@ final class LibraryStore: ObservableObject {
             .dropFirst()
             .sink { [weak self] manualOffline in
                 guard let self else { return }
-                self.player.handleNetworkAvailability(self.networkAvailable && !manualOffline)
+                let playbackNetworkAvailable = self.networkAvailable && !manualOffline
+                self.player.handleNetworkAvailability(playbackNetworkAvailable)
+                self.updatePlayerAvailability(effectiveOffline: !playbackNetworkAvailable)
             }
     }
 
@@ -178,6 +182,7 @@ final class LibraryStore: ObservableObject {
             let loadedTracks = try await catalog.fetchTracks(reciterID: id)
             guard selectedReciterID == id else { return }
             tracks = loadedTracks
+            tracksByReciter[id] = loadedTracks
             let snapshot = await cache.snapshot()
             for track in loadedTracks {
                 knownTrackReciterIDs[track.id] = track.reciterID
@@ -190,6 +195,7 @@ final class LibraryStore: ObservableObject {
                     cacheStates[track.id] = .cached(download)
                 }
             }
+            updatePlayerAvailability()
         } catch {
             nonfatalError = error.localizedDescription
         }
@@ -200,7 +206,7 @@ final class LibraryStore: ObservableObject {
         selectedTrackID = track.id
         player.select(
             track: track,
-            queue: tracks,
+            queue: playbackQueue(for: track.reciterID),
             localURLs: localURLs()
         )
         playerState = player.state
@@ -364,7 +370,9 @@ final class LibraryStore: ObservableObject {
                     guard !Task.isCancelled else { return }
                     self?.networkAvailable = available
                     guard let self else { return }
-                    self.player.handleNetworkAvailability(available && !self.preferences.manualOffline)
+                    let playbackNetworkAvailable = available && !self.preferences.manualOffline
+                    self.player.handleNetworkAvailability(playbackNetworkAvailable)
+                    self.updatePlayerAvailability(effectiveOffline: !playbackNetworkAvailable)
                 }
             },
             Task { @MainActor [weak self] in
@@ -411,16 +419,28 @@ final class LibraryStore: ObservableObject {
             cacheStates[trackID] = state
             return false
         }
-        if state.isTerminal,
-           let currentState = await cache.state(trackID: trackID),
-           currentState != state {
-            return await receiveCacheState(currentState, trackID: trackID)
+        if state.isTerminal {
+            guard let currentState = await cache.state(trackID: trackID) else {
+                cacheStates.removeValue(forKey: trackID)
+                return true
+            }
+            if currentState != state {
+                return await receiveCacheState(currentState, trackID: trackID)
+            }
         }
         if case .cached = state {
             do {
                 try await refreshCacheSummary()
             } catch {
                 nonfatalError = error.localizedDescription
+            }
+            guard !Task.isCancelled else { return true }
+            guard let currentState = await cache.state(trackID: trackID) else {
+                cacheStates.removeValue(forKey: trackID)
+                return true
+            }
+            if currentState != state {
+                return await receiveCacheState(currentState, trackID: trackID)
             }
         }
         cacheStates[trackID] = state
@@ -441,19 +461,56 @@ final class LibraryStore: ObservableObject {
     }
 
     private func refreshCacheSummary() async throws {
-        async let downloads = userLibrary.downloads()
-        async let groups = userLibrary.downloadGroups()
-        async let bytes = userLibrary.totalDownloadedBytes()
-        let loadedDownloads = try await downloads
-        downloadsByTrack = Dictionary(uniqueKeysWithValues: loadedDownloads.map { ($0.trackID, $0) })
-        cacheGroups = try await groups
-        totalCachedBytes = try await bytes
-        cachedCounts = Dictionary(
-            uniqueKeysWithValues: cacheGroups.map { ($0.reciterID, $0.trackCount) }
+        cacheRefreshGeneration &+= 1
+        let generation = cacheRefreshGeneration
+        let loadedDownloads = try await userLibrary.downloads()
+        guard generation == cacheRefreshGeneration else { return }
+
+        let groups = Dictionary(grouping: loadedDownloads, by: \.reciterID)
+            .map { reciterID, downloads in
+                CachedDownloadGroup(
+                    reciterID: reciterID,
+                    trackCount: downloads.count,
+                    byteCount: downloads.reduce(0) { $0 + $1.byteCount }
+                )
+            }
+            .sorted { $0.reciterID < $1.reciterID }
+        let summaryDownloads = Dictionary(
+            uniqueKeysWithValues: loadedDownloads.map { ($0.trackID, $0) }
         )
+        let counts = Dictionary(
+            uniqueKeysWithValues: groups.map { ($0.reciterID, $0.trackCount) }
+        )
+        let totalBytes = loadedDownloads.reduce(Int64(0)) { $0 + $1.byteCount }
+
+        downloadsByTrack = summaryDownloads
+        cacheGroups = groups
+        cachedCounts = counts
+        totalCachedBytes = totalBytes
         for download in loadedDownloads {
             cacheStates[download.trackID] = .cached(download)
         }
+        updatePlayerAvailability()
+    }
+
+    private func playbackQueue(
+        for reciterID: String,
+        effectiveOffline offlineOverride: Bool? = nil
+    ) -> [Track] {
+        let availableTracks = tracksByReciter[reciterID] ?? []
+        let offline = offlineOverride ?? effectiveOffline
+        guard offline else { return availableTracks }
+        return availableTracks.filter { downloadsByTrack[$0.id] != nil }
+    }
+
+    private func updatePlayerAvailability(effectiveOffline offlineOverride: Bool? = nil) {
+        guard let reciterID = player.state.currentTrack?.reciterID,
+              tracksByReciter[reciterID] != nil else { return }
+        player.updateAvailability(
+            queue: playbackQueue(for: reciterID, effectiveOffline: offlineOverride),
+            localURLs: localURLs()
+        )
+        playerState = player.state
     }
 
     private func localURLs() -> [String: URL] {

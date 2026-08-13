@@ -31,6 +31,7 @@ protocol QuranPlaying: AnyObject {
 
     func updates() -> AsyncStream<PlayerState>
     func select(track: Track, queue: [Track], localURLs: [String: URL])
+    func updateAvailability(queue: [Track], localURLs: [String: URL])
     func play()
     func pause()
     func stop()

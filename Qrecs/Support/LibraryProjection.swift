@@ -48,12 +48,10 @@ enum LibraryProjection {
                 )
             }
             .sorted { lhs, rhs in
-                compare(
-                    lhs.reciter.displayName(language: language),
-                    rhs.reciter.displayName(language: language),
-                    direction: direction,
-                    fallbackAscending: lhs.id < rhs.id
-                )
+                switch sort {
+                case .name:
+                    reciterPrecedes(lhs, rhs, direction: direction, language: language)
+                }
             }
         return ReciterGroups(
             favorites: rows.filter { favorites.contains($0.id) },
@@ -79,26 +77,51 @@ enum LibraryProjection {
                         || String(row.track.surahNumber).contains(query))
             }
             .sorted { lhs, rhs in
-                let ascending: Bool
-                switch sort {
-                case .number:
-                    ascending = lhs.track.surahNumber < rhs.track.surahNumber
-                case .name:
-                    ascending = compare(
-                        lhs.surah.displayName(language: language),
-                        rhs.surah.displayName(language: language),
-                        direction: .ascending,
-                        fallbackAscending: lhs.track.surahNumber < rhs.track.surahNumber
-                    )
-                case .status:
-                    let leftRank = cacheRank(lhs.cacheState)
-                    let rightRank = cacheRank(rhs.cacheState)
-                    ascending = leftRank == rightRank
-                        ? lhs.track.surahNumber < rhs.track.surahNumber
-                        : leftRank < rightRank
-                }
-                return direction == .ascending ? ascending : !ascending
+                trackPrecedes(
+                    lhs, rhs, sort: sort,
+                    direction: direction, language: language
+                )
             }
+    }
+
+    static func reciterPrecedes(
+        _ lhs: ReciterPresentation,
+        _ rhs: ReciterPresentation,
+        direction: SortDirection,
+        language: ResolvedAppLanguage
+    ) -> Bool {
+        var result = lhs.reciter.displayName(language: language)
+            .localizedCaseInsensitiveCompare(rhs.reciter.displayName(language: language))
+        if result == .orderedSame {
+            result = ordering(lhs.id, rhs.id)
+        }
+        return precedes(result, direction: direction)
+    }
+
+    static func trackPrecedes(
+        _ lhs: TrackPresentation,
+        _ rhs: TrackPresentation,
+        sort: TrackSort,
+        direction: SortDirection,
+        language: ResolvedAppLanguage
+    ) -> Bool {
+        let primary: ComparisonResult
+        switch sort {
+        case .number:
+            primary = ordering(lhs.track.surahNumber, rhs.track.surahNumber)
+        case .name:
+            primary = lhs.surah.displayName(language: language)
+                .localizedCaseInsensitiveCompare(rhs.surah.displayName(language: language))
+        case .status:
+            primary = ordering(cacheRank(lhs.cacheState), cacheRank(rhs.cacheState))
+        }
+        let numbered = primary == .orderedSame
+            ? ordering(lhs.track.surahNumber, rhs.track.surahNumber)
+            : primary
+        let stable = numbered == .orderedSame
+            ? ordering(lhs.id, rhs.id)
+            : numbered
+        return precedes(stable, direction: direction)
     }
 
     private static func cacheRank(_ state: CacheDownloadState?) -> Int {
@@ -119,20 +142,21 @@ enum LibraryProjection {
         ).trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    private static func compare(
-        _ lhs: String,
-        _ rhs: String,
-        direction: SortDirection,
-        fallbackAscending: Bool
+    private static func ordering<T: Comparable>(_ lhs: T, _ rhs: T) -> ComparisonResult {
+        if lhs < rhs { return .orderedAscending }
+        if lhs > rhs { return .orderedDescending }
+        return .orderedSame
+    }
+
+    private static func precedes(
+        _ result: ComparisonResult,
+        direction: SortDirection
     ) -> Bool {
-        let comparison = lhs.localizedCaseInsensitiveCompare(rhs)
-        let ascending: Bool
-        switch comparison {
-        case .orderedAscending: ascending = true
-        case .orderedDescending: ascending = false
-        case .orderedSame: ascending = fallbackAscending
+        switch (result, direction) {
+        case (.orderedAscending, .ascending), (.orderedDescending, .descending): true
+        case (.orderedAscending, .descending), (.orderedDescending, .ascending),
+             (.orderedSame, _): false
         }
-        return direction == .ascending ? ascending : !ascending
     }
 }
 

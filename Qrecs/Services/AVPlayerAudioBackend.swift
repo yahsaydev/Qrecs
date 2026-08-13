@@ -11,15 +11,28 @@ private final class AVTimeObserverToken: @unchecked Sendable {
 
 @MainActor
 final class AVPlayerAudioBackend: QuranAudioBackend {
+    typealias StatusHandler = @MainActor (AVPlayerItem.Status, String) -> Void
+    typealias StatusObservationFactory = (
+        AVPlayerItem,
+        @escaping StatusHandler
+    ) -> NSKeyValueObservation?
+
     private let player: AVPlayer
+    private let statusObservationFactory: StatusObservationFactory
     private var continuations: [UUID: AsyncStream<QuranAudioEvent>.Continuation] = [:]
     private var endObserver: NSObjectProtocol?
     private var failureObserver: NSObjectProtocol?
+    private var statusObservation: NSKeyValueObservation?
     private var timeObserver: AVTimeObserverToken?
     private var currentItemID: QuranAudioItemID?
+    private var hasPublishedFailureForCurrentItem = false
 
-    init(player: AVPlayer = AVPlayer()) {
+    init(
+        player: AVPlayer = AVPlayer(),
+        statusObservationFactory: StatusObservationFactory? = nil
+    ) {
         self.player = player
+        self.statusObservationFactory = statusObservationFactory ?? Self.observeStatus
         timeObserver = AVTimeObserverToken(player.addPeriodicTimeObserver(
             forInterval: CMTime(seconds: 0.5, preferredTimescale: 600),
             queue: .main
@@ -45,13 +58,23 @@ final class AVPlayerAudioBackend: QuranAudioBackend {
         if let failureObserver {
             NotificationCenter.default.removeObserver(failureObserver)
         }
+        statusObservation?.invalidate()
     }
 
     func load(url: URL, itemID: QuranAudioItemID) {
         removeItemObservers()
         let item = AVPlayerItem(url: url)
         currentItemID = itemID
+        hasPublishedFailureForCurrentItem = false
         player.replaceCurrentItem(with: item)
+        statusObservation = statusObservationFactory(item) { [weak self, weak item] status, message in
+            guard let self,
+                  let item,
+                  item === self.player.currentItem,
+                  itemID == self.currentItemID,
+                  status == .failed else { return }
+            self.publishFailureOnce(itemID: itemID, message: message)
+        }
         endObserver = NotificationCenter.default.addObserver(
             forName: .AVPlayerItemDidPlayToEndTime,
             object: item,
@@ -76,15 +99,15 @@ final class AVPlayerAudioBackend: QuranAudioBackend {
                       item === self.player.currentItem,
                       itemID == self.currentItemID else { return }
                 let error = item.error
-                self.publish(.failed(
+                self.publishFailureOnce(
                     itemID: itemID,
                     message: Self.failureMessage(for: error)
-                ))
+                )
             }
         }
     }
 
-    static func failureMessage(for error: Error?) -> String {
+    nonisolated static func failureMessage(for error: Error?) -> String {
         error?.localizedDescription ?? ""
     }
 
@@ -120,6 +143,25 @@ final class AVPlayerAudioBackend: QuranAudioBackend {
         }
     }
 
+    private func publishFailureOnce(itemID: QuranAudioItemID, message: String) {
+        guard !hasPublishedFailureForCurrentItem else { return }
+        hasPublishedFailureForCurrentItem = true
+        publish(.failed(itemID: itemID, message: message))
+    }
+
+    private static func observeStatus(
+        item: AVPlayerItem,
+        handler: @escaping StatusHandler
+    ) -> NSKeyValueObservation? {
+        item.observe(\.status, options: [.initial, .new]) { item, _ in
+            let status = item.status
+            let message = failureMessage(for: item.error)
+            Task { @MainActor in
+                handler(status, message)
+            }
+        }
+    }
+
     private func removeItemObservers() {
         if let endObserver {
             NotificationCenter.default.removeObserver(endObserver)
@@ -129,5 +171,7 @@ final class AVPlayerAudioBackend: QuranAudioBackend {
             NotificationCenter.default.removeObserver(failureObserver)
             self.failureObserver = nil
         }
+        statusObservation?.invalidate()
+        statusObservation = nil
     }
 }

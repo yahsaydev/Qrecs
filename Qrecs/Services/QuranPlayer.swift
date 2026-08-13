@@ -5,6 +5,7 @@ final class QuranPlayer: QuranPlaying {
     private let audio: any QuranAudioBackend
     private let ambient: any AmbientMixing
     private var queue: [Track] = []
+    private var availableQueue: [Track] = []
     private var currentIndex: Int?
     private var localURLs: [String: URL] = [:]
     private var currentAudioItemID: QuranAudioItemID?
@@ -59,9 +60,38 @@ final class QuranPlayer: QuranPlaying {
             ambient.pause()
         }
         self.queue = candidateQueue
+        availableQueue = candidateQueue
         self.localURLs = localURLs
         currentIndex = candidateIndex
         loadCurrent(playing: false, resetProgress: true)
+    }
+
+    func updateAvailability(queue: [Track], localURLs: [String: URL]) {
+        self.localURLs = localURLs
+        guard let currentTrack = state.currentTrack else { return }
+
+        availableQueue = Self.canonicalQueue(queue, for: currentTrack.reciterID)
+        var candidateQueue = availableQueue
+        candidateQueue.removeAll {
+            $0.surahNumber == currentTrack.surahNumber && $0.id != currentTrack.id
+        }
+        if !candidateQueue.contains(where: { $0.id == currentTrack.id }) {
+            candidateQueue.append(currentTrack)
+            candidateQueue.sort {
+                if $0.surahNumber != $1.surahNumber {
+                    return $0.surahNumber < $1.surahNumber
+                }
+                return $0.id < $1.id
+            }
+        }
+        guard let candidateIndex = candidateQueue.firstIndex(where: { $0.id == currentTrack.id }) else {
+            return
+        }
+
+        self.queue = candidateQueue
+        currentIndex = candidateIndex
+        updateNavigationState()
+        publish()
     }
 
     func play() {
@@ -185,6 +215,10 @@ final class QuranPlayer: QuranPlaying {
     private func loadCurrent(playing: Bool, resetProgress: Bool) {
         guard let currentIndex, queue.indices.contains(currentIndex) else { return }
         let track = queue[currentIndex]
+        if let availableIndex = availableQueue.firstIndex(where: { $0.id == track.id }) {
+            queue = availableQueue
+            self.currentIndex = availableIndex
+        }
         let localURL = localURLs[track.id]
         let source: PlaybackSource = localURL == nil ? .remote : .local
         if resetProgress {

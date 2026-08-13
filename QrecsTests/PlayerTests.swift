@@ -1,9 +1,99 @@
+@preconcurrency import AVFoundation
 import Foundation
 import XCTest
 @testable import Qrecs
 
 @MainActor
 final class PlayerTests: XCTestCase {
+    func testAVPlayerFailedStatusPublishesOnlyForCurrentItem() async {
+        let probe = AVPlayerStatusProbe()
+        let backend = AVPlayerAudioBackend(
+            player: AVPlayer(),
+            statusObservationFactory: { _, handler in
+                probe.handlers.append(handler)
+                return nil
+            }
+        )
+        let stream = backend.events()
+        let staleItemID = QuranAudioItemID()
+        let currentItemID = QuranAudioItemID()
+        backend.load(url: URL(string: "https://example.com/old.mp3")!, itemID: staleItemID)
+        backend.load(url: URL(string: "https://example.com/current.mp3")!, itemID: currentItemID)
+        let error = NSError(domain: "QrecsTests", code: 7, userInfo: [
+            NSLocalizedDescriptionKey: "decoder initialization failed",
+        ])
+
+        probe.send(.failed, message: error.localizedDescription, at: 0)
+        probe.send(.failed, message: error.localizedDescription, at: 1)
+
+        var iterator = stream.makeAsyncIterator()
+        let event = await iterator.next()
+        XCTAssertEqual(
+            event,
+            .failed(itemID: currentItemID, message: error.localizedDescription)
+        )
+    }
+
+    func testAVPlayerAlreadyFailedStatusPublishesWhenObservationStarts() async {
+        let expectedMessage = "asset failed before observation"
+        let backend = AVPlayerAudioBackend(
+            player: AVPlayer(),
+            statusObservationFactory: { _, handler in
+                handler(.failed, expectedMessage)
+                return nil
+            }
+        )
+        let stream = backend.events()
+        let itemID = QuranAudioItemID()
+        let observed = expectation(description: "already failed item status is published")
+        let task = Task { @MainActor in
+            for await event in stream {
+                XCTAssertEqual(event, .failed(itemID: itemID, message: expectedMessage))
+                observed.fulfill()
+                return
+            }
+        }
+
+        backend.load(url: URL(string: "https://example.com/failed.mp3")!, itemID: itemID)
+        await fulfillment(of: [observed], timeout: 1)
+        task.cancel()
+    }
+
+    func testAVPlayerStatusAndNotificationFailurePublishOnlyOnce() async {
+        let probe = AVPlayerStatusProbe()
+        let backend = AVPlayerAudioBackend(
+            player: AVPlayer(),
+            statusObservationFactory: { item, handler in
+                probe.items.append(item)
+                probe.handlers.append(handler)
+                return nil
+            }
+        )
+        let stream = backend.events()
+        let itemID = QuranAudioItemID()
+        let first = expectation(description: "first failure is published")
+        let duplicate = expectation(description: "duplicate failure is suppressed")
+        duplicate.isInverted = true
+        let task = Task { @MainActor in
+            var count = 0
+            for await event in stream {
+                guard case .failed = event else { continue }
+                count += 1
+                if count == 1 { first.fulfill() }
+                if count > 1 { duplicate.fulfill() }
+            }
+        }
+        backend.load(url: URL(string: "https://example.com/failed.mp3")!, itemID: itemID)
+
+        probe.send(.failed, message: "decoder failed", at: 0)
+        NotificationCenter.default.post(
+            name: .AVPlayerItemFailedToPlayToEndTime,
+            object: probe.items[0]
+        )
+        await fulfillment(of: [first, duplicate], timeout: 0.2)
+        task.cancel()
+    }
+
     func testAVPlayerMissingErrorDefersToLocalizedStoreFallback() {
         XCTAssertEqual(AVPlayerAudioBackend.failureMessage(for: nil), "")
     }
@@ -113,6 +203,124 @@ final class PlayerTests: XCTestCase {
         player.previous()
         XCTAssertEqual(player.state.currentTrack?.surahNumber, 1)
         XCTAssertEqual(player.state.status, .paused)
+    }
+
+    func testOfflineAvailabilityUpdateSkipsUncachedRemoteTrack() {
+        let backend = FakeQuranAudioBackend()
+        let ambient = FakeAmbientMixer()
+        let player = QuranPlayer(audio: backend, ambient: ambient)
+        let tracks = [makeTrack(1), makeTrack(2), makeTrack(3)]
+        let firstURL = URL(fileURLWithPath: "/tmp/local-001.mp3")
+        let thirdURL = URL(fileURLWithPath: "/tmp/local-003.mp3")
+        let localURLs = [tracks[0].id: firstURL, tracks[2].id: thirdURL]
+        player.select(track: tracks[0], queue: tracks, localURLs: localURLs)
+
+        player.updateAvailability(
+            queue: [tracks[0], tracks[2]],
+            localURLs: localURLs
+        )
+        player.handleNetworkAvailability(false)
+        player.next()
+
+        XCTAssertEqual(player.state.currentTrack, tracks[2])
+        XCTAssertEqual(player.state.source, .local)
+        XCTAssertEqual(player.state.status, .paused)
+        XCTAssertEqual(backend.loadedURLs, [firstURL, thirdURL])
+    }
+
+    func testAvailabilityUpdateUsesNewlyCachedFileOnLaterNavigation() {
+        let backend = FakeQuranAudioBackend()
+        let ambient = FakeAmbientMixer()
+        let player = QuranPlayer(audio: backend, ambient: ambient)
+        let tracks = [makeTrack(1), makeTrack(2)]
+        let firstURL = URL(fileURLWithPath: "/tmp/local-001.mp3")
+        let secondURL = URL(fileURLWithPath: "/tmp/local-002.mp3")
+        player.select(
+            track: tracks[0],
+            queue: tracks,
+            localURLs: [tracks[0].id: firstURL]
+        )
+
+        player.updateAvailability(
+            queue: tracks,
+            localURLs: [tracks[0].id: firstURL, tracks[1].id: secondURL]
+        )
+        player.next()
+
+        XCTAssertEqual(player.state.currentTrack, tracks[1])
+        XCTAssertEqual(player.state.source, .local)
+        XCTAssertEqual(backend.loadedURLs, [firstURL, secondURL])
+    }
+
+    func testAvailabilityUpdateRemovesCachedFileBeforeOfflineNavigation() {
+        let backend = FakeQuranAudioBackend()
+        let ambient = FakeAmbientMixer()
+        let player = QuranPlayer(audio: backend, ambient: ambient)
+        let tracks = [makeTrack(1), makeTrack(2)]
+        let firstURL = URL(fileURLWithPath: "/tmp/local-001.mp3")
+        let secondURL = URL(fileURLWithPath: "/tmp/local-002.mp3")
+        player.select(
+            track: tracks[0],
+            queue: tracks,
+            localURLs: [tracks[0].id: firstURL, tracks[1].id: secondURL]
+        )
+
+        player.updateAvailability(
+            queue: tracks,
+            localURLs: [tracks[0].id: firstURL]
+        )
+        player.handleNetworkAvailability(false)
+        player.next()
+
+        XCTAssertEqual(player.state.currentTrack, tracks[1])
+        XCTAssertEqual(player.state.source, .remote)
+        XCTAssertEqual(player.state.status, .failed(.networkUnavailable))
+        XCTAssertEqual(backend.loadedURLs, [firstURL])
+    }
+
+    func testAvailabilityUpdatePreservesCurrentItemPositionWithoutReload() {
+        let backend = FakeQuranAudioBackend()
+        let ambient = FakeAmbientMixer()
+        let player = QuranPlayer(audio: backend, ambient: ambient)
+        let tracks = [makeTrack(1), makeTrack(2), makeTrack(3)]
+        player.select(track: tracks[1], queue: tracks, localURLs: [:])
+        player.seek(to: 19)
+
+        player.updateAvailability(queue: [tracks[2]], localURLs: [:])
+
+        XCTAssertEqual(player.state.currentTrack, tracks[1])
+        XCTAssertEqual(player.state.elapsed, 19)
+        XCTAssertEqual(player.state.status, .paused)
+        XCTAssertEqual(backend.loadedURLs, [tracks[1].url])
+        XCTAssertFalse(player.state.canGoPrevious)
+        XCTAssertTrue(player.state.canGoNext)
+    }
+
+    func testUnavailablePreservedCurrentCannotBeRevisitedAfterAvailableTransition() {
+        let backend = FakeQuranAudioBackend()
+        let ambient = FakeAmbientMixer()
+        let player = QuranPlayer(audio: backend, ambient: ambient)
+        let tracks = [makeTrack(1), makeTrack(2)]
+        let firstURL = URL(fileURLWithPath: "/tmp/local-001.mp3")
+        let secondURL = URL(fileURLWithPath: "/tmp/local-002.mp3")
+        player.select(
+            track: tracks[0],
+            queue: tracks,
+            localURLs: [tracks[0].id: firstURL, tracks[1].id: secondURL]
+        )
+
+        player.updateAvailability(
+            queue: [tracks[1]],
+            localURLs: [tracks[1].id: secondURL]
+        )
+        player.handleNetworkAvailability(false)
+        player.next()
+
+        XCTAssertEqual(player.state.currentTrack, tracks[1])
+        XCTAssertFalse(player.state.canGoPrevious)
+        player.previous()
+        XCTAssertEqual(player.state.currentTrack, tracks[1])
+        XCTAssertEqual(backend.loadedURLs, [firstURL, secondURL])
     }
 
     func testSelectingAnotherTrackPausesTheWholeActiveMix() {
@@ -426,6 +634,16 @@ final class PlayerTests: XCTestCase {
         }
         XCTFail("Player state stream ended before the expected state")
         return player.state
+    }
+}
+
+@MainActor
+private final class AVPlayerStatusProbe {
+    var items: [AVPlayerItem] = []
+    var handlers: [AVPlayerAudioBackend.StatusHandler] = []
+
+    func send(_ status: AVPlayerItem.Status, message: String, at index: Int) {
+        handlers[index](status, message)
     }
 }
 

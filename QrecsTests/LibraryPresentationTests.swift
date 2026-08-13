@@ -133,6 +133,56 @@ final class LibraryPresentationTests: XCTestCase {
         XCTAssertEqual(project(rows, .status, .descending).map(\.track.surahNumber), [1, 114, 2])
     }
 
+    func testReciterComparatorIsIrreflexiveAndUsesStableIDTieBreak() {
+        let first = ReciterPresentation(
+            reciter: Reciter(id: "a", sourceNameRU: "Одинаково", nameRU: "Одинаково", nameEN: "Same"),
+            cachedCount: 0
+        )
+        let second = ReciterPresentation(
+            reciter: Reciter(id: "b", sourceNameRU: "Одинаково", nameRU: "Одинаково", nameEN: "Same"),
+            cachedCount: 0
+        )
+
+        for direction in SortDirection.allCases {
+            XCTAssertFalse(LibraryProjection.reciterPrecedes(
+                first, first, direction: direction, language: .english
+            ))
+        }
+        XCTAssertTrue(LibraryProjection.reciterPrecedes(
+            first, second, direction: .ascending, language: .english
+        ))
+        XCTAssertTrue(LibraryProjection.reciterPrecedes(
+            second, first, direction: .descending, language: .english
+        ))
+    }
+
+    func testTrackComparatorsAreIrreflexiveAndStableForEqualKeys() {
+        let first = TrackPresentation(
+            track: Track(id: "r:a", reciterID: "r", surahNumber: 1, url: URL(string: "https://example.com/a.mp3")!),
+            surah: Surah(number: 1, nameRU: "Одинаково", nameEN: "Same"),
+            cacheState: nil
+        )
+        let second = TrackPresentation(
+            track: Track(id: "r:b", reciterID: "r", surahNumber: 1, url: URL(string: "https://example.com/b.mp3")!),
+            surah: Surah(number: 1, nameRU: "Одинаково", nameEN: "Same"),
+            cacheState: nil
+        )
+
+        for sort in TrackSort.allCases {
+            for direction in SortDirection.allCases {
+                XCTAssertFalse(LibraryProjection.trackPrecedes(
+                    first, first, sort: sort, direction: direction, language: .english
+                ))
+            }
+            XCTAssertTrue(LibraryProjection.trackPrecedes(
+                first, second, sort: sort, direction: .ascending, language: .english
+            ))
+            XCTAssertTrue(LibraryProjection.trackPrecedes(
+                second, first, sort: sort, direction: .descending, language: .english
+            ))
+        }
+    }
+
     func testOfflineTrackProjectionOnlyShowsCachedRows() {
         let projected = LibraryProjection.tracks(
             rows: makeTrackRows(), query: "", sort: .number,
