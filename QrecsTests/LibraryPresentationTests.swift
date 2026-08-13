@@ -1,0 +1,186 @@
+import Foundation
+import XCTest
+@testable import Qrecs
+
+@MainActor
+final class LibraryPresentationTests: XCTestCase {
+    func testSystemLanguageUsesRussianOnlyForPrimaryRussianLanguage() {
+        XCTAssertEqual(AppLanguage.system.resolve(preferredLanguages: ["ru-RU", "en"]), .russian)
+        XCTAssertEqual(AppLanguage.system.resolve(preferredLanguages: ["en-RU", "ru"]), .english)
+        XCTAssertEqual(AppLanguage.system.resolve(preferredLanguages: []), .english)
+        XCTAssertEqual(AppLanguage.russian.resolve(preferredLanguages: ["en"]), .russian)
+        XCTAssertEqual(AppLanguage.english.resolve(preferredLanguages: ["ru"]), .english)
+    }
+
+    func testPreferencesRoundTripAndInvalidValuesFallBackSafely() {
+        let suiteName = "QrecsTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let preferences = AppPreferences(defaults: defaults, preferredLanguages: ["en"])
+        preferences.language = .russian
+        preferences.theme = .dark
+        preferences.manualOffline = true
+        preferences.quranVolume = 0.72
+        preferences.ambientMasterVolume = 0.43
+        preferences.setAmbientEnabled(true, for: .rain)
+        preferences.setAmbientVolume(0.31, for: .rain)
+
+        let restored = AppPreferences(defaults: defaults, preferredLanguages: ["en"])
+        XCTAssertEqual(restored.language, .russian)
+        XCTAssertEqual(restored.theme, .dark)
+        XCTAssertTrue(restored.manualOffline)
+        XCTAssertEqual(restored.quranVolume, 0.72, accuracy: 0.0001)
+        XCTAssertEqual(restored.ambientMasterVolume, 0.43, accuracy: 0.0001)
+        XCTAssertTrue(restored.ambientEnabled(.rain))
+        XCTAssertEqual(restored.ambientVolume(.rain), 0.31, accuracy: 0.0001)
+
+        defaults.set("not-a-language", forKey: AppPreferences.Key.language)
+        defaults.set("not-a-theme", forKey: AppPreferences.Key.theme)
+        defaults.set(9.0, forKey: AppPreferences.Key.quranVolume)
+        let invalid = AppPreferences(defaults: defaults, preferredLanguages: ["en"])
+        XCTAssertEqual(invalid.language, .system)
+        XCTAssertEqual(invalid.theme, .system)
+        XCTAssertEqual(invalid.quranVolume, 1, accuracy: 0.0001)
+    }
+
+    func testReciterProjectionSearchesAllNamesAndKeepsFavoritesFirst() {
+        let reciters = [
+            Reciter(id: "a", sourceNameRU: "Шейх Альфа", nameRU: "Альфа", nameEN: "Zayd"),
+            Reciter(id: "b", sourceNameRU: "Кари Бета", nameRU: "Бета", nameEN: "Adam"),
+            Reciter(id: "c", sourceNameRU: "Другой", nameRU: "Гамма", nameEN: "Musa"),
+        ]
+
+        let searched = LibraryProjection.reciterGroups(
+            reciters: reciters,
+            favorites: ["a"],
+            cachedCounts: ["a": 2, "b": 1],
+            query: "шейх",
+            sort: .name,
+            direction: .ascending,
+            language: .english,
+            effectiveOffline: false
+        )
+        XCTAssertEqual(searched.favorites.map(\.reciter.id), ["a"])
+        XCTAssertTrue(searched.all.isEmpty)
+        XCTAssertEqual(searched.favorites.first?.cachedCount, 2)
+
+        let all = LibraryProjection.reciterGroups(
+            reciters: reciters,
+            favorites: ["a"],
+            cachedCounts: ["a": 2, "b": 1],
+            query: "",
+            sort: .name,
+            direction: .descending,
+            language: .english,
+            effectiveOffline: false
+        )
+        XCTAssertEqual(all.favorites.map(\.reciter.id), ["a"])
+        XCTAssertEqual(all.all.map(\.reciter.id), ["c", "b"])
+    }
+
+    func testOfflineReciterProjectionHidesUncachedReciters() {
+        let reciters = [
+            Reciter(id: "a", sourceNameRU: "А", nameRU: "А", nameEN: "A"),
+            Reciter(id: "b", sourceNameRU: "Б", nameRU: "Б", nameEN: "B"),
+        ]
+        let groups = LibraryProjection.reciterGroups(
+            reciters: reciters,
+            favorites: ["b"],
+            cachedCounts: ["a": 1],
+            query: "",
+            sort: .name,
+            direction: .ascending,
+            language: .english,
+            effectiveOffline: true
+        )
+        XCTAssertEqual(groups.favorites.map(\.reciter.id), [])
+        XCTAssertEqual(groups.all.map(\.reciter.id), ["a"])
+    }
+
+    func testTrackProjectionSearchesBothLanguagesAndNumber() {
+        let rows = makeTrackRows()
+        XCTAssertEqual(
+            LibraryProjection.tracks(
+                rows: rows, query: "фати", sort: .number,
+                direction: .ascending, language: .english, effectiveOffline: false
+            ).map(\.track.surahNumber),
+            [1]
+        )
+        XCTAssertEqual(
+            LibraryProjection.tracks(
+                rows: rows, query: "baqa", sort: .number,
+                direction: .ascending, language: .russian, effectiveOffline: false
+            ).map(\.track.surahNumber),
+            [2]
+        )
+        XCTAssertEqual(
+            LibraryProjection.tracks(
+                rows: rows, query: "114", sort: .number,
+                direction: .ascending, language: .english, effectiveOffline: false
+            ).map(\.track.surahNumber),
+            [114]
+        )
+    }
+
+    func testTrackProjectionSortsEveryColumnInBothDirections() {
+        let rows = makeTrackRows()
+        XCTAssertEqual(project(rows, .number, .ascending).map(\.track.surahNumber), [1, 2, 114])
+        XCTAssertEqual(project(rows, .number, .descending).map(\.track.surahNumber), [114, 2, 1])
+        XCTAssertEqual(project(rows, .name, .ascending).map(\.track.surahNumber), [2, 1, 114])
+        XCTAssertEqual(project(rows, .name, .descending).map(\.track.surahNumber), [114, 1, 2])
+        XCTAssertEqual(project(rows, .status, .ascending).map(\.track.surahNumber), [2, 114, 1])
+        XCTAssertEqual(project(rows, .status, .descending).map(\.track.surahNumber), [1, 114, 2])
+    }
+
+    func testOfflineTrackProjectionOnlyShowsCachedRows() {
+        let projected = LibraryProjection.tracks(
+            rows: makeTrackRows(), query: "", sort: .number,
+            direction: .ascending, language: .english, effectiveOffline: true
+        )
+        XCTAssertEqual(projected.map(\.track.surahNumber), [1])
+    }
+
+    func testCatalogDisplayNamesFollowResolvedLanguage() {
+        let reciter = Reciter(id: "r", sourceNameRU: "Источник", nameRU: "Русский", nameEN: "English")
+        let surah = Surah(number: 1, nameRU: "Аль-Фатиха", nameEN: "Al-Fatihah")
+        XCTAssertEqual(reciter.displayName(language: .russian), "Русский")
+        XCTAssertEqual(reciter.displayName(language: .english), "English")
+        XCTAssertEqual(surah.displayName(language: .russian), "Аль-Фатиха")
+        XCTAssertEqual(surah.displayName(language: .english), "Al-Fatihah")
+    }
+
+    private func project(
+        _ rows: [TrackPresentation],
+        _ sort: TrackSort,
+        _ direction: SortDirection
+    ) -> [TrackPresentation] {
+        LibraryProjection.tracks(
+            rows: rows, query: "", sort: sort, direction: direction,
+            language: .english, effectiveOffline: false
+        )
+    }
+
+    private func makeTrackRows() -> [TrackPresentation] {
+        [
+            TrackPresentation(
+                track: Track(id: "r:114", reciterID: "r", surahNumber: 114, url: URL(string: "https://example.com/114.mp3")!),
+                surah: Surah(number: 114, nameRU: "Ан-Нас", nameEN: "An-Nas"),
+                cacheState: .downloading(progress: DownloadProgress(bytesReceived: 1, totalBytesExpected: 2))
+            ),
+            TrackPresentation(
+                track: Track(id: "r:1", reciterID: "r", surahNumber: 1, url: URL(string: "https://example.com/001.mp3")!),
+                surah: Surah(number: 1, nameRU: "Аль-Фатиха", nameEN: "Al-Fatihah"),
+                cacheState: .cached(CachedDownload(
+                    trackID: "r:1", reciterID: "r", relativePath: "1.mp3", byteCount: 1,
+                    etag: nil, updatedAt: Date(timeIntervalSince1970: 0)
+                ))
+            ),
+            TrackPresentation(
+                track: Track(id: "r:2", reciterID: "r", surahNumber: 2, url: URL(string: "https://example.com/002.mp3")!),
+                surah: Surah(number: 2, nameRU: "Аль-Бакара", nameEN: "Al-Baqarah"),
+                cacheState: nil
+            ),
+        ]
+    }
+}

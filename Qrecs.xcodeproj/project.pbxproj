@@ -51,6 +51,21 @@
 		120000000000000000000203 /* rain.mp3 in Resources */ = {isa = PBXBuildFile; fileRef = 220000000000000000000203 /* rain.mp3 */; };
 		120000000000000000000204 /* waterfall.mp3 in Resources */ = {isa = PBXBuildFile; fileRef = 220000000000000000000204 /* waterfall.mp3 */; };
 		120000000000000000000205 /* THIRD_PARTY_NOTICES in Resources */ = {isa = PBXBuildFile; fileRef = 220000000000000000000205 /* THIRD_PARTY_NOTICES */; };
+		130000000000000000000001 /* LibraryPresentationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 230000000000000000000001 /* LibraryPresentationTests.swift */; };
+		130000000000000000000002 /* AppSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 230000000000000000000002 /* AppSettings.swift */; };
+		130000000000000000000003 /* LibraryProjection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 230000000000000000000003 /* LibraryProjection.swift */; };
+		130000000000000000000004 /* LibraryStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 230000000000000000000004 /* LibraryStoreTests.swift */; };
+		130000000000000000000005 /* LibraryStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 230000000000000000000005 /* LibraryStore.swift */; };
+		130000000000000000000006 /* Localization.swift in Sources */ = {isa = PBXBuildFile; fileRef = 230000000000000000000006 /* Localization.swift */; };
+		130000000000000000000007 /* Localizable.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = 230000000000000000000007 /* Localizable.xcstrings */; };
+		130000000000000000000008 /* AppContainer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 230000000000000000000008 /* AppContainer.swift */; };
+		130000000000000000000009 /* GlassSurface.swift in Sources */ = {isa = PBXBuildFile; fileRef = 230000000000000000000009 /* GlassSurface.swift */; };
+		13000000000000000000000A /* PlaybackCommands.swift in Sources */ = {isa = PBXBuildFile; fileRef = 23000000000000000000000A /* PlaybackCommands.swift */; };
+		13000000000000000000000B /* LibraryRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 23000000000000000000000B /* LibraryRootView.swift */; };
+		13000000000000000000000C /* ReciterSidebarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 23000000000000000000000C /* ReciterSidebarView.swift */; };
+		13000000000000000000000D /* TrackTableView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 23000000000000000000000D /* TrackTableView.swift */; };
+		13000000000000000000000E /* AmbientSoundsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 23000000000000000000000E /* AmbientSoundsView.swift */; };
+		13000000000000000000000F /* MiniPlayerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 23000000000000000000000F /* MiniPlayerView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -118,6 +133,21 @@
 		220000000000000000000203 /* rain.mp3 */ = {isa = PBXFileReference; lastKnownFileType = audio.mp3; path = rain.mp3; sourceTree = "<group>"; };
 		220000000000000000000204 /* waterfall.mp3 */ = {isa = PBXFileReference; lastKnownFileType = audio.mp3; path = waterfall.mp3; sourceTree = "<group>"; };
 		220000000000000000000205 /* THIRD_PARTY_NOTICES */ = {isa = PBXFileReference; lastKnownFileType = text; path = THIRD_PARTY_NOTICES; sourceTree = "<group>"; };
+		230000000000000000000001 /* LibraryPresentationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryPresentationTests.swift; sourceTree = "<group>"; };
+		230000000000000000000002 /* AppSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppSettings.swift; sourceTree = "<group>"; };
+		230000000000000000000003 /* LibraryProjection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryProjection.swift; sourceTree = "<group>"; };
+		230000000000000000000004 /* LibraryStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryStoreTests.swift; sourceTree = "<group>"; };
+		230000000000000000000005 /* LibraryStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryStore.swift; sourceTree = "<group>"; };
+		230000000000000000000006 /* Localization.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Localization.swift; sourceTree = "<group>"; };
+		230000000000000000000007 /* Localizable.xcstrings */ = {isa = PBXFileReference; lastKnownFileType = text.json.xcstrings; path = Localizable.xcstrings; sourceTree = "<group>"; };
+		230000000000000000000008 /* AppContainer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppContainer.swift; sourceTree = "<group>"; };
+		230000000000000000000009 /* GlassSurface.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlassSurface.swift; sourceTree = "<group>"; };
+		23000000000000000000000A /* PlaybackCommands.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaybackCommands.swift; sourceTree = "<group>"; };
+		23000000000000000000000B /* LibraryRootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryRootView.swift; sourceTree = "<group>"; };
+		23000000000000000000000C /* ReciterSidebarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReciterSidebarView.swift; sourceTree = "<group>"; };
+		23000000000000000000000D /* TrackTableView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrackTableView.swift; sourceTree = "<group>"; };
+		23000000000000000000000E /* AmbientSoundsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AmbientSoundsView.swift; sourceTree = "<group>"; };
+		23000000000000000000000F /* MiniPlayerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MiniPlayerView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -175,6 +205,7 @@
 		700000000000000000000003 /* App */ = {
 			isa = PBXGroup;
 			children = (
+				230000000000000000000008 /* AppContainer.swift */,
 				200000000000000000000001 /* QrecsApp.swift */,
 			);
 			path = App;
@@ -183,10 +214,41 @@
 		700000000000000000000004 /* Features */ = {
 			isa = PBXGroup;
 			children = (
+				730000000000000000000001 /* Library */,
+				730000000000000000000002 /* Player */,
+				730000000000000000000003 /* Shared */,
 				700000000000000000000005 /* Shell */,
 				70000000000000000000000E /* Settings */,
 			);
 			path = Features;
+			sourceTree = "<group>";
+		};
+		730000000000000000000001 /* Library */ = {
+			isa = PBXGroup;
+			children = (
+				23000000000000000000000B /* LibraryRootView.swift */,
+				23000000000000000000000C /* ReciterSidebarView.swift */,
+				23000000000000000000000D /* TrackTableView.swift */,
+			);
+			path = Library;
+			sourceTree = "<group>";
+		};
+		730000000000000000000002 /* Player */ = {
+			isa = PBXGroup;
+			children = (
+				23000000000000000000000E /* AmbientSoundsView.swift */,
+				23000000000000000000000F /* MiniPlayerView.swift */,
+			);
+			path = Player;
+			sourceTree = "<group>";
+		};
+		730000000000000000000003 /* Shared */ = {
+			isa = PBXGroup;
+			children = (
+				230000000000000000000009 /* GlassSurface.swift */,
+				23000000000000000000000A /* PlaybackCommands.swift */,
+			);
+			path = Shared;
 			sourceTree = "<group>";
 		};
 		700000000000000000000005 /* Shell */ = {
@@ -208,6 +270,7 @@
 		700000000000000000000006 /* Resources */ = {
 			isa = PBXGroup;
 			children = (
+				230000000000000000000007 /* Localizable.xcstrings */,
 				200000000000000000000004 /* Assets.xcassets */,
 				720000000000000000000001 /* Ambient */,
 				70000000000000000000000F /* Catalog */,
@@ -218,6 +281,7 @@
 		700000000000000000000007 /* Models */ = {
 			isa = PBXGroup;
 			children = (
+				230000000000000000000002 /* AppSettings.swift */,
 				220000000000000000000101 /* AmbientSound.swift */,
 				210000000000000000000006 /* CachedDownload.swift */,
 				210000000000000000000007 /* CacheState.swift */,
@@ -250,10 +314,19 @@
 			path = Services;
 			sourceTree = "<group>";
 		};
-		700000000000000000000009 /* Stores */ = {isa = PBXGroup; children = (); path = Stores; sourceTree = "<group>"; };
+		700000000000000000000009 /* Stores */ = {
+			isa = PBXGroup;
+			children = (
+				230000000000000000000005 /* LibraryStore.swift */,
+			);
+			path = Stores;
+			sourceTree = "<group>";
+		};
 		70000000000000000000000A /* Support */ = {
 			isa = PBXGroup;
 			children = (
+				230000000000000000000006 /* Localization.swift */,
+				230000000000000000000003 /* LibraryProjection.swift */,
 				210000000000000000000005 /* AppPaths.swift */,
 				20000000000000000000000B /* RootConfiguration.swift */,
 			);
@@ -263,6 +336,8 @@
 		70000000000000000000000B /* QrecsTests */ = {
 			isa = PBXGroup;
 			children = (
+				230000000000000000000004 /* LibraryStoreTests.swift */,
+				230000000000000000000001 /* LibraryPresentationTests.swift */,
 				220000000000000000000002 /* AmbientMixerTests.swift */,
 				220000000000000000000003 /* AmbientResourceTests.swift */,
 				210000000000000000000001 /* AppPathsAndOfflinePolicyTests.swift */,
@@ -393,6 +468,7 @@
 			hasScannedForEncodings = 0;
 			knownRegions = (
 				en,
+				ru,
 				Base,
 			);
 			mainGroup = 700000000000000000000001;
@@ -415,6 +491,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				130000000000000000000007 /* Localizable.xcstrings in Resources */,
 				100000000000000000000004 /* Assets.xcassets in Resources */,
 				120000000000000000000202 /* birds.mp3 in Resources */,
 				10000000000000000000000F /* catalog.sqlite in Resources */,
@@ -434,6 +511,15 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				130000000000000000000008 /* AppContainer.swift in Sources */,
+				13000000000000000000000E /* AmbientSoundsView.swift in Sources */,
+				130000000000000000000009 /* GlassSurface.swift in Sources */,
+				13000000000000000000000B /* LibraryRootView.swift in Sources */,
+				13000000000000000000000F /* MiniPlayerView.swift in Sources */,
+				13000000000000000000000A /* PlaybackCommands.swift in Sources */,
+				13000000000000000000000C /* ReciterSidebarView.swift in Sources */,
+				13000000000000000000000D /* TrackTableView.swift in Sources */,
+				130000000000000000000002 /* AppSettings.swift in Sources */,
 				120000000000000000000108 /* AVAudioEngineAmbientBackend.swift in Sources */,
 				120000000000000000000107 /* AVPlayerAudioBackend.swift in Sources */,
 				120000000000000000000104 /* AmbientMixer.swift in Sources */,
@@ -450,6 +536,9 @@
 				10000000000000000000000E /* GRDBCatalogRepository.swift in Sources */,
 				110000000000000000000009 /* GRDBUserLibraryRepository.swift in Sources */,
 				11000000000000000000000B /* NetworkMonitoring.swift in Sources */,
+				130000000000000000000003 /* LibraryProjection.swift in Sources */,
+				130000000000000000000006 /* Localization.swift in Sources */,
+				130000000000000000000005 /* LibraryStore.swift in Sources */,
 				120000000000000000000102 /* PlayerState.swift in Sources */,
 				120000000000000000000106 /* QuranPlayer.swift in Sources */,
 				120000000000000000000105 /* QuranPlaying.swift in Sources */,
@@ -467,6 +556,8 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				130000000000000000000004 /* LibraryStoreTests.swift in Sources */,
+				130000000000000000000001 /* LibraryPresentationTests.swift in Sources */,
 				120000000000000000000002 /* AmbientMixerTests.swift in Sources */,
 				120000000000000000000003 /* AmbientResourceTests.swift in Sources */,
 				110000000000000000000001 /* AppPathsAndOfflinePolicyTests.swift in Sources */,
