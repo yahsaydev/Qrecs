@@ -76,7 +76,12 @@ else
         fail "verification slept despite finding the matching process"
     }
 
-    matched_pid="$(wait_for_app_process "Qrecs" "$EXPECTED_BINARY" 3 0)"
+    MATCHED_PID_OUTPUT="$TEST_DIR/matched-pid"
+    matched_pid=""
+    if ! wait_for_app_process "Qrecs" "$EXPECTED_BINARY" 3 0 > "$MATCHED_PID_OUTPUT"; then
+        fail "verification did not find the expected app process"
+    fi
+    matched_pid="$(< "$MATCHED_PID_OUTPUT")"
     assert_equal "202" "$matched_pid" "verification ignores a same-name process with the wrong executable"
 
     FIND_CALLS="$TEST_DIR/find-calls"
