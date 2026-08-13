@@ -42,20 +42,23 @@ final class QuranPlayer: QuranPlaying {
     }
 
     func select(track: Track, queue: [Track], localURLs: [String: URL]) {
+        var candidateQueue = Self.canonicalQueue(queue, for: track.reciterID)
+        var candidateIndex = candidateQueue.firstIndex(where: { $0.id == track.id })
+            ?? candidateQueue.firstIndex(where: { $0.surahNumber == track.surahNumber })
+        if candidateIndex == nil, (1...114).contains(track.surahNumber) {
+            candidateQueue.append(track)
+            candidateQueue.sort { $0.surahNumber < $1.surahNumber }
+            candidateIndex = candidateQueue.firstIndex(where: { $0.id == track.id })
+        }
+        guard let candidateIndex else { return }
+
         if state.status == .playing {
             audio.pause()
             ambient.pause()
         }
-        self.queue = Self.canonicalQueue(queue, for: track.reciterID)
+        self.queue = candidateQueue
         self.localURLs = localURLs
-        currentIndex = self.queue.firstIndex(where: { $0.id == track.id })
-            ?? self.queue.firstIndex(where: { $0.surahNumber == track.surahNumber })
-        if currentIndex == nil, (1...114).contains(track.surahNumber) {
-            self.queue.append(track)
-            self.queue.sort { $0.surahNumber < $1.surahNumber }
-            currentIndex = self.queue.firstIndex(where: { $0.id == track.id })
-        }
-        guard currentIndex != nil else { return }
+        currentIndex = candidateIndex
         loadCurrent(playing: false, resetProgress: true)
     }
 

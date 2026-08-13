@@ -81,6 +81,25 @@ final class PlayerTests: XCTestCase {
         XCTAssertFalse(ambient.state.isPlaying)
     }
 
+    func testSelectingOutOfRangeTrackLeavesCurrentPlaybackUntouched() {
+        let backend = FakeQuranAudioBackend()
+        let ambient = FakeAmbientMixer()
+        let player = QuranPlayer(audio: backend, ambient: ambient)
+        let current = makeTrack(1)
+        player.select(track: current, queue: [current], localURLs: [:])
+        player.play()
+
+        let invalid = makeTrack(115)
+        player.select(track: invalid, queue: [invalid], localURLs: [:])
+
+        XCTAssertEqual(player.state.currentTrack, current)
+        XCTAssertEqual(player.state.status, .playing)
+        XCTAssertEqual(backend.loadedURLs, [current.url])
+        XCTAssertEqual(backend.pauseCount, 0)
+        XCTAssertEqual(ambient.pauseCount, 0)
+        XCTAssertTrue(ambient.state.isPlaying)
+    }
+
     func testPauseResumeSeekVolumeAndProgressAreObservable() async {
         let backend = FakeQuranAudioBackend()
         let ambient = FakeAmbientMixer()
