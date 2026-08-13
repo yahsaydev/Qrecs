@@ -82,6 +82,41 @@ final class DownloadClientTests: XCTestCase {
         }
     }
 
+    func testCancellationAtCompletedFileHandoffRemovesProductionTemporaryFile() async throws {
+        let body = Data(repeating: 0x41, count: 8 * 1024)
+        StubURLProtocol.setHandler { request in
+            (
+                HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,
+                body
+            )
+        }
+        let directory = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let gate = BlockingDownloadHandoffGate()
+        let client = URLSessionDownloadClient(
+            configuration: stubConfiguration(),
+            temporaryDirectory: directory,
+            handoffGate: gate
+        )
+        let stream = await client.events(for: URL(string: "https://qrecs.test/handoff.mp3")!)
+        let consumer = Task {
+            do {
+                for try await _ in stream {}
+            } catch {}
+        }
+
+        gate.waitUntilReached()
+        consumer.cancel()
+        gate.release()
+        await consumer.value
+        for _ in 0..<200 {
+            if try FileManager.default.contentsOfDirectory(atPath: directory.path).isEmpty { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: directory.path), [])
+    }
+
     private func stubConfiguration() -> URLSessionConfiguration {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [StubURLProtocol.self]
@@ -93,6 +128,33 @@ final class DownloadClientTests: XCTestCase {
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         return directory
+    }
+}
+
+private final class BlockingDownloadHandoffGate: DownloadHandoffGating, @unchecked Sendable {
+    private let condition = NSCondition()
+    private var reached = false
+    private var released = false
+
+    func waitBeforeHandoff(fileURL: URL) {
+        condition.lock()
+        reached = true
+        condition.broadcast()
+        while !released { condition.wait() }
+        condition.unlock()
+    }
+
+    func waitUntilReached() {
+        condition.lock()
+        while !reached { condition.wait() }
+        condition.unlock()
+    }
+
+    func release() {
+        condition.lock()
+        released = true
+        condition.broadcast()
+        condition.unlock()
     }
 }
 

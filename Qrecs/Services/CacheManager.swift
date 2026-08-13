@@ -9,14 +9,34 @@ enum CacheManagerError: Error, Equatable, Sendable {
 actor CacheManager: CacheManaging {
     private static let maximumActiveDownloads = 2
 
+    private struct OperationGeneration: Equatable, Sendable {
+        let global: UInt64
+        let track: UInt64
+    }
+
+    private struct PendingDownload: Sendable {
+        let track: Track
+        let generation: OperationGeneration
+    }
+
     private let repository: any UserLibraryRepository
     private let downloader: any DownloadClient
     private let paths: AppPaths
+    private let reservationWaitObserver: (@Sendable (String) -> Void)?
     private var states: [String: CacheDownloadState] = [:]
     private var knownTracks: [String: Track] = [:]
     private var reservationTokens: [String: UUID] = [:]
-    private var pendingTracks: [Track] = []
+    private var reservationOperations: [String: UUID] = [:]
+    private var reservationCompletionWaiters: [
+        String: [CheckedContinuation<Void, Never>]
+    ] = [:]
+    private var pendingDownloads: [PendingDownload] = []
     private var activeTasks: [String: Task<Void, Never>] = [:]
+    private var globalGeneration: UInt64 = 0
+    private var trackGenerations: [String: UInt64] = [:]
+    private var globalDeletionDepth = 0
+    private var trackDeletionDepths: [String: Int] = [:]
+    private var reciterDeletionDepths: [String: Int] = [:]
     private var eventContinuations: [
         String: [UUID: AsyncStream<CacheDownloadState>.Continuation]
     ] = [:]
@@ -24,23 +44,27 @@ actor CacheManager: CacheManaging {
     private init(
         repository: any UserLibraryRepository,
         downloader: any DownloadClient,
-        paths: AppPaths
+        paths: AppPaths,
+        reservationWaitObserver: (@Sendable (String) -> Void)?
     ) {
         self.repository = repository
         self.downloader = downloader
         self.paths = paths
+        self.reservationWaitObserver = reservationWaitObserver
     }
 
     static func make(
         repository: any UserLibraryRepository,
         downloader: any DownloadClient,
-        paths: AppPaths
+        paths: AppPaths,
+        reservationWaitObserver: (@Sendable (String) -> Void)? = nil
     ) async throws -> CacheManager {
         try paths.prepareDirectories()
         let manager = CacheManager(
             repository: repository,
             downloader: downloader,
-            paths: paths
+            paths: paths,
+            reservationWaitObserver: reservationWaitObserver
         )
         try await manager.reconcile()
         return manager
@@ -72,30 +96,40 @@ actor CacheManager: CacheManaging {
 
     func cache(track: Track) async throws {
         knownTracks[track.id] = track
-        if reservationTokens[track.id] != nil
-            || activeTasks[track.id] != nil
-            || pendingTracks.contains(where: { $0.id == track.id }) {
+        guard !isDeletionBlocked(track: track) else {
+            updateState(.cancelled, trackID: track.id)
             return
         }
+        if reservationOperations[track.id] != nil
+            || activeTasks[track.id] != nil
+            || pendingDownloads.contains(where: { $0.track.id == track.id }) {
+            return
+        }
+        let generation = operationGeneration(trackID: track.id)
         let reservationToken = UUID()
         reservationTokens[track.id] = reservationToken
-        defer {
-            if reservationTokens[track.id] == reservationToken {
-                reservationTokens.removeValue(forKey: track.id)
-            }
-        }
+        reservationOperations[track.id] = reservationToken
+        defer { completeReservationOperation(trackID: track.id, token: reservationToken) }
         let existing = try await repository.download(trackID: track.id)
-        guard reservationTokens[track.id] == reservationToken else { return }
+        guard reservationTokens[track.id] == reservationToken,
+              isOperationCurrent(generation, track: track) else {
+            updateState(.cancelled, trackID: track.id)
+            return
+        }
         if let existing {
             if let fileURL = validatedFileURL(for: existing), isRegularFile(fileURL) {
                 updateState(.cached(existing), trackID: track.id)
                 return
             }
             try await repository.removeDownload(trackID: track.id)
-            guard reservationTokens[track.id] == reservationToken else { return }
+            guard reservationTokens[track.id] == reservationToken,
+                  isOperationCurrent(generation, track: track) else {
+                updateState(.cancelled, trackID: track.id)
+                return
+            }
         }
 
-        pendingTracks.append(track)
+        pendingDownloads.append(PendingDownload(track: track, generation: generation))
         updateState(.queued, trackID: track.id)
         startPendingDownloads()
     }
@@ -104,8 +138,9 @@ actor CacheManager: CacheManaging {
         if reservationTokens.removeValue(forKey: trackID) != nil {
             updateState(.cancelled, trackID: trackID)
         }
-        if let index = pendingTracks.firstIndex(where: { $0.id == trackID }) {
-            pendingTracks.remove(at: index)
+        await waitForReservationOperation(trackID: trackID)
+        if let index = pendingDownloads.firstIndex(where: { $0.track.id == trackID }) {
+            pendingDownloads.remove(at: index)
             updateState(.cancelled, trackID: trackID)
         }
         if let task = activeTasks[trackID] {
@@ -121,38 +156,53 @@ actor CacheManager: CacheManaging {
     }
 
     func remove(trackID: String) async throws {
+        beginTrackDeletion(trackID: trackID)
+        defer { endTrackDeletion(trackID: trackID) }
         await cancel(trackID: trackID)
-        if let download = try await repository.download(trackID: trackID),
-           let fileURL = validatedFileURL(for: download) {
-            try removeIfPresent(fileURL)
-        }
-        try await repository.removeDownload(trackID: trackID)
+        try await removePersistedTrack(trackID: trackID)
         states.removeValue(forKey: trackID)
-        knownTracks.removeValue(forKey: trackID)
     }
 
     func removeAll(reciterID: String) async throws {
-        let persisted = try await repository.downloads().filter { $0.reciterID == reciterID }
-        let transientIDs = knownTracks.values
+        beginReciterDeletion(reciterID: reciterID)
+        defer { endReciterDeletion(reciterID: reciterID) }
+
+        let transientIDs = Set(knownTracks.values
             .filter { $0.reciterID == reciterID }
-            .map(\.id)
-        for trackID in Set(persisted.map(\.trackID) + transientIDs) {
-            try await remove(trackID: trackID)
+            .map(\.id))
+        invalidate(trackIDs: transientIDs)
+        for trackID in transientIDs {
+            await cancel(trackID: trackID)
+        }
+
+        let persisted = try await repository.downloads().filter { $0.reciterID == reciterID }
+        let trackIDs = Set(persisted.map(\.trackID)).union(transientIDs)
+        invalidate(trackIDs: trackIDs.subtracting(transientIDs))
+        for trackID in trackIDs {
+            await cancel(trackID: trackID)
+            try await removePersistedTrack(trackID: trackID)
+            states.removeValue(forKey: trackID)
         }
     }
 
     func clearAll() async throws {
-        let trackIDs = Set(
+        beginGlobalDeletion()
+        defer { endGlobalDeletion() }
+
+        let transientIDs = Set(
             activeTasks.keys
-                + pendingTracks.map(\.id)
+                + pendingDownloads.map(\.track.id)
                 + knownTracks.keys
                 + reservationTokens.keys
-                + (try await repository.downloads()).map(\.trackID)
+                + reservationOperations.keys
         )
-        for trackID in trackIDs {
+        for trackID in transientIDs {
             await cancel(trackID: trackID)
         }
-        for download in try await repository.downloads() {
+
+        let persisted = try await repository.downloads()
+        for download in persisted {
+            await cancel(trackID: download.trackID)
             if let fileURL = validatedFileURL(for: download) {
                 try removeIfPresent(fileURL)
             }
@@ -160,8 +210,7 @@ actor CacheManager: CacheManaging {
         }
         try removeAllDirectoryEntries()
         states.removeAll()
-        knownTracks.removeAll()
-        pendingTracks.removeAll()
+        pendingDownloads.removeAll()
         reservationTokens.removeAll()
     }
 
@@ -224,35 +273,55 @@ actor CacheManager: CacheManaging {
     }
 
     private func startPendingDownloads() {
-        while activeTasks.count < Self.maximumActiveDownloads, !pendingTracks.isEmpty {
-            let track = pendingTracks.removeFirst()
+        while activeTasks.count < Self.maximumActiveDownloads, !pendingDownloads.isEmpty {
+            let pending = pendingDownloads.removeFirst()
+            guard isOperationCurrent(pending.generation, track: pending.track) else {
+                updateState(.cancelled, trackID: pending.track.id)
+                continue
+            }
             let task = Task { [weak self] in
                 guard let self else { return }
-                await self.performDownload(track: track)
+                await self.performDownload(
+                    track: pending.track,
+                    generation: pending.generation
+                )
             }
-            activeTasks[track.id] = task
+            activeTasks[pending.track.id] = task
         }
     }
 
-    private func performDownload(track: Track) async {
+    private func performDownload(
+        track: Track,
+        generation: OperationGeneration
+    ) async {
         var downloadedFile: DownloadedFile?
         do {
+            try ensureOperationCurrent(generation, track: track)
             updateState(.downloading(progress: nil), trackID: track.id)
             let stream = await downloader.events(for: track.url)
             for try await event in stream {
                 try Task.checkCancellation()
+                try ensureOperationCurrent(generation, track: track)
                 switch event {
                 case let .progress(progress):
                     updateState(.downloading(progress: progress), trackID: track.id)
                 case let .completed(file):
+                    file.claimOwnership()
                     downloadedFile = file
+                    try Task.checkCancellation()
                 }
             }
             try Task.checkCancellation()
+            try ensureOperationCurrent(generation, track: track)
             guard let downloadedFile else {
                 throw CacheManagerError.incompleteDownload
             }
-            let cached = try await finalize(downloadedFile, track: track)
+            let cached = try await finalize(
+                downloadedFile,
+                track: track,
+                generation: generation
+            )
+            try ensureOperationCurrent(generation, track: track)
             updateState(.cached(cached), trackID: track.id)
         } catch is CancellationError {
             if let downloadedFile { try? FileManager.default.removeItem(at: downloadedFile.fileURL) }
@@ -270,8 +339,10 @@ actor CacheManager: CacheManaging {
 
     private func finalize(
         _ downloadedFile: DownloadedFile,
-        track: Track
+        track: Track,
+        generation: OperationGeneration
     ) async throws -> CachedDownload {
+        try ensureOperationCurrent(generation, track: track)
         let sourceSize = try downloadedFile.fileURL
             .resourceValues(forKeys: [.fileSizeKey])
             .fileSize ?? 0
@@ -304,11 +375,14 @@ actor CacheManager: CacheManaging {
             )
         )
         do {
+            try ensureOperationCurrent(generation, track: track)
             try await repository.upsertDownload(cached)
+            try ensureOperationCurrent(generation, track: track)
             guard let persisted = try await repository.download(trackID: track.id) else {
                 throw CacheManagerError.incompleteDownload
             }
             try Task.checkCancellation()
+            try ensureOperationCurrent(generation, track: track)
             return persisted
         } catch {
             let repository = self.repository
@@ -325,6 +399,106 @@ actor CacheManager: CacheManaging {
             }
             throw error
         }
+    }
+
+    private func operationGeneration(trackID: String) -> OperationGeneration {
+        OperationGeneration(
+            global: globalGeneration,
+            track: trackGenerations[trackID, default: 0]
+        )
+    }
+
+    private func waitForReservationOperation(trackID: String) async {
+        guard reservationOperations[trackID] != nil else { return }
+        reservationWaitObserver?(trackID)
+        await withCheckedContinuation {
+            reservationCompletionWaiters[trackID, default: []].append($0)
+        }
+    }
+
+    private func completeReservationOperation(trackID: String, token: UUID) {
+        if reservationTokens[trackID] == token {
+            reservationTokens.removeValue(forKey: trackID)
+        }
+        guard reservationOperations[trackID] == token else { return }
+        reservationOperations.removeValue(forKey: trackID)
+        let waiters = reservationCompletionWaiters.removeValue(forKey: trackID) ?? []
+        for waiter in waiters {
+            waiter.resume()
+        }
+    }
+
+    private func isOperationCurrent(
+        _ generation: OperationGeneration,
+        track: Track
+    ) -> Bool {
+        generation == operationGeneration(trackID: track.id)
+            && !isDeletionBlocked(track: track)
+    }
+
+    private func ensureOperationCurrent(
+        _ generation: OperationGeneration,
+        track: Track
+    ) throws {
+        guard isOperationCurrent(generation, track: track) else {
+            throw CancellationError()
+        }
+    }
+
+    private func isDeletionBlocked(track: Track) -> Bool {
+        globalDeletionDepth > 0
+            || trackDeletionDepths[track.id, default: 0] > 0
+            || reciterDeletionDepths[track.reciterID, default: 0] > 0
+    }
+
+    private func beginGlobalDeletion() {
+        globalDeletionDepth += 1
+        globalGeneration &+= 1
+    }
+
+    private func endGlobalDeletion() {
+        globalDeletionDepth -= 1
+    }
+
+    private func beginTrackDeletion(trackID: String) {
+        trackDeletionDepths[trackID, default: 0] += 1
+        trackGenerations[trackID, default: 0] &+= 1
+    }
+
+    private func endTrackDeletion(trackID: String) {
+        let remaining = trackDeletionDepths[trackID, default: 1] - 1
+        if remaining == 0 {
+            trackDeletionDepths.removeValue(forKey: trackID)
+        } else {
+            trackDeletionDepths[trackID] = remaining
+        }
+    }
+
+    private func beginReciterDeletion(reciterID: String) {
+        reciterDeletionDepths[reciterID, default: 0] += 1
+    }
+
+    private func endReciterDeletion(reciterID: String) {
+        let remaining = reciterDeletionDepths[reciterID, default: 1] - 1
+        if remaining == 0 {
+            reciterDeletionDepths.removeValue(forKey: reciterID)
+        } else {
+            reciterDeletionDepths[reciterID] = remaining
+        }
+    }
+
+    private func invalidate(trackIDs: Set<String>) {
+        for trackID in trackIDs {
+            trackGenerations[trackID, default: 0] &+= 1
+        }
+    }
+
+    private func removePersistedTrack(trackID: String) async throws {
+        if let download = try await repository.download(trackID: trackID),
+           let fileURL = validatedFileURL(for: download) {
+            try removeIfPresent(fileURL)
+        }
+        try await repository.removeDownload(trackID: trackID)
     }
 
     private func updateState(_ state: CacheDownloadState, trackID: String) {

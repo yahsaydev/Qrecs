@@ -14,6 +14,49 @@ struct DownloadedFile: Equatable, Sendable {
     let fileURL: URL
     let byteCount: Int64
     let etag: String?
+    private let lease: DownloadedFileLease
+
+    init(fileURL: URL, byteCount: Int64, etag: String?) {
+        self.fileURL = fileURL
+        self.byteCount = byteCount
+        self.etag = etag
+        self.lease = DownloadedFileLease(fileURL: fileURL)
+    }
+
+    /// Transfers cleanup responsibility from the downloader to the cache manager.
+    /// Until claimed, dropping the last copy removes the staged `.download` file.
+    func claimOwnership() {
+        lease.claim()
+    }
+
+    static func == (lhs: DownloadedFile, rhs: DownloadedFile) -> Bool {
+        lhs.fileURL == rhs.fileURL
+            && lhs.byteCount == rhs.byteCount
+            && lhs.etag == rhs.etag
+    }
+}
+
+/// The lock protects the single ownership transition and makes deinit cleanup safe
+/// when stream termination and URLSession delegate callbacks race under Swift 6.
+private final class DownloadedFileLease: @unchecked Sendable {
+    private let lock = NSLock()
+    private let fileURL: URL
+    private var isClaimed = false
+
+    init(fileURL: URL) {
+        self.fileURL = fileURL
+    }
+
+    func claim() {
+        lock.withLock { isClaimed = true }
+    }
+
+    deinit {
+        let shouldRemove = lock.withLock { !isClaimed }
+        if shouldRemove {
+            try? FileManager.default.removeItem(at: fileURL)
+        }
+    }
 }
 
 enum DownloadEvent: Equatable, Sendable {
@@ -32,23 +75,33 @@ protocol DownloadClient: Sendable {
     func events(for url: URL) async -> AsyncThrowingStream<DownloadEvent, Error>
 }
 
+/// Internal test seam at the exact point where a validated file leaves the
+/// URLSession delegate and becomes visible to the stream consumer.
+protocol DownloadHandoffGating: Sendable {
+    func waitBeforeHandoff(fileURL: URL)
+}
+
 struct URLSessionDownloadClient: DownloadClient, Sendable {
     private let configuration: URLSessionConfiguration
     private let temporaryDirectory: URL
+    private let handoffGate: (any DownloadHandoffGating)?
 
     init(
         configuration: URLSessionConfiguration = .default,
         temporaryDirectory: URL = FileManager.default.temporaryDirectory
-            .appendingPathComponent("QrecsDownloads", isDirectory: true)
+            .appendingPathComponent("QrecsDownloads", isDirectory: true),
+        handoffGate: (any DownloadHandoffGating)? = nil
     ) {
         self.configuration = configuration.copy() as! URLSessionConfiguration
         self.temporaryDirectory = temporaryDirectory
+        self.handoffGate = handoffGate
     }
 
     func events(for url: URL) async -> AsyncThrowingStream<DownloadEvent, Error> {
         let (stream, continuation) = AsyncThrowingStream<DownloadEvent, Error>.makeStream()
         let delegate = DownloadDelegateBridge(
             temporaryDirectory: temporaryDirectory,
+            handoffGate: handoffGate,
             continuation: continuation
         )
         let session = URLSession(
@@ -72,6 +125,7 @@ struct URLSessionDownloadClient: DownloadClient, Sendable {
 private final class DownloadDelegateBridge: NSObject, URLSessionDownloadDelegate, @unchecked Sendable {
     private let lock = NSLock()
     private let temporaryDirectory: URL
+    private let handoffGate: (any DownloadHandoffGating)?
     private var continuation: AsyncThrowingStream<DownloadEvent, Error>.Continuation?
     private var session: URLSession?
     private var task: URLSessionDownloadTask?
@@ -80,9 +134,11 @@ private final class DownloadDelegateBridge: NSObject, URLSessionDownloadDelegate
 
     init(
         temporaryDirectory: URL,
+        handoffGate: (any DownloadHandoffGating)?,
         continuation: AsyncThrowingStream<DownloadEvent, Error>.Continuation
     ) {
         self.temporaryDirectory = temporaryDirectory
+        self.handoffGate = handoffGate
         self.continuation = continuation
     }
 
@@ -180,6 +236,7 @@ private final class DownloadDelegateBridge: NSObject, URLSessionDownloadDelegate
 
         switch completion.1 {
         case let .success(file):
+            handoffGate?.waitBeforeHandoff(fileURL: file.fileURL)
             completion.0?.yield(.completed(file))
             completion.0?.finish()
         case let .failure(error):

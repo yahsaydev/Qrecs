@@ -196,6 +196,167 @@ final class CacheManagerTests: XCTestCase {
         XCTAssertEqual(try cacheDirectoryEntries(fixture.paths), [])
     }
 
+    func testCacheDuringClearAllIsCancelledAndCanBeRetriedAfterClear() async throws {
+        let root = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let paths = try AppPaths(baseDirectory: root)
+        try paths.prepareDirectories()
+        let repository = try GRDBUserLibraryRepository(databaseURL: paths.userDatabaseURL)
+        let pausingRepository = PausingUserLibraryRepository(
+            repository: repository,
+            pauseUpserts: false,
+            pauseDownloadsCallNumber: 2
+        )
+        let downloader = ControllableDownloadClient(temporaryDirectory: root.appendingPathComponent("Transfers"))
+        let manager = try await CacheManager.make(repository: pausingRepository, downloader: downloader, paths: paths)
+        let track = makeTrack(id: "cache-during-clear", reciterID: "r1")
+
+        let clearing = Task { try await manager.clearAll() }
+        await pausingRepository.waitUntilDownloadsPaused()
+        try await manager.cache(track: track)
+        await pausingRepository.resumeDownloads()
+        try await clearing.value
+        try await Task.sleep(for: .milliseconds(20))
+
+        let startsAfterClear = await downloader.startCount(for: track.url)
+        XCTAssertEqual(startsAfterClear, 0)
+        let cachedTrackIDsAfterClear = try await repository.cachedTrackIDs()
+        XCTAssertEqual(cachedTrackIDsAfterClear, [])
+        XCTAssertEqual(try cacheDirectoryEntries(paths), [])
+
+        try await manager.retry(trackID: track.id)
+        await downloader.waitUntilStarted(track.url)
+        try await downloader.succeed(track.url, bytes: Data("retry".utf8), etag: nil)
+        for _ in 0..<200 {
+            if try await repository.download(trackID: track.id) != nil { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        let retriedDownload = try await repository.download(trackID: track.id)
+        XCTAssertEqual(retriedDownload?.byteCount, 5)
+    }
+
+    func testCacheForReciterDuringRemoveAllIsCancelled() async throws {
+        let root = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let paths = try AppPaths(baseDirectory: root)
+        try paths.prepareDirectories()
+        let repository = try GRDBUserLibraryRepository(databaseURL: paths.userDatabaseURL)
+        let pausingRepository = PausingUserLibraryRepository(
+            repository: repository,
+            pauseUpserts: false,
+            pauseDownloadsCallNumber: 2
+        )
+        let downloader = ControllableDownloadClient(temporaryDirectory: root.appendingPathComponent("Transfers"))
+        let manager = try await CacheManager.make(repository: pausingRepository, downloader: downloader, paths: paths)
+        let oldTrack = makeTrack(id: "old-r1", reciterID: "r1")
+        let newTrack = makeTrack(id: "new-r1", reciterID: "r1")
+        try await manager.cache(track: oldTrack)
+        await downloader.waitUntilStarted(oldTrack.url)
+        try await downloader.succeed(oldTrack.url, bytes: Data("old".utf8), etag: nil)
+        for _ in 0..<200 {
+            if try await repository.download(trackID: oldTrack.id) != nil { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+
+        let removing = Task { try await manager.removeAll(reciterID: "r1") }
+        await pausingRepository.waitUntilDownloadsPaused()
+        try await manager.cache(track: newTrack)
+        await pausingRepository.resumeDownloads()
+        try await removing.value
+        try await Task.sleep(for: .milliseconds(20))
+
+        let newStarts = await downloader.startCount(for: newTrack.url)
+        XCTAssertEqual(newStarts, 0)
+        let cachedTrackIDsAfterRemoval = try await repository.cachedTrackIDs()
+        XCTAssertEqual(cachedTrackIDsAfterRemoval, [])
+        XCTAssertEqual(try cacheDirectoryEntries(paths), [])
+    }
+
+    func testCacheSameTrackDuringRemoveDoesNotEscapeDeletion() async throws {
+        let root = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let paths = try AppPaths(baseDirectory: root)
+        try paths.prepareDirectories()
+        let repository = try GRDBUserLibraryRepository(databaseURL: paths.userDatabaseURL)
+        let pausingRepository = PausingUserLibraryRepository(
+            repository: repository,
+            pauseUpserts: false,
+            pauseFirstRemoveDownload: true
+        )
+        let downloader = ControllableDownloadClient(temporaryDirectory: root.appendingPathComponent("Transfers"))
+        let manager = try await CacheManager.make(repository: pausingRepository, downloader: downloader, paths: paths)
+        let track = makeTrack(id: "remove-race", reciterID: "r1")
+        try await manager.cache(track: track)
+        await downloader.waitUntilStarted(track.url)
+        try await downloader.succeed(track.url, bytes: Data("old".utf8), etag: nil)
+        for _ in 0..<200 {
+            if try await repository.download(trackID: track.id) != nil { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+
+        let removing = Task { try await manager.remove(trackID: track.id) }
+        await pausingRepository.waitUntilRemoveDownloadPaused()
+        try await manager.cache(track: track)
+        await pausingRepository.resumeRemoveDownload()
+        try await removing.value
+        try await Task.sleep(for: .milliseconds(20))
+
+        let starts = await downloader.startCount(for: track.url)
+        XCTAssertEqual(starts, 1)
+        let persistedDownload = try await repository.download(trackID: track.id)
+        XCTAssertNil(persistedDownload)
+        XCTAssertEqual(try cacheDirectoryEntries(paths), [])
+    }
+
+    func testClearWaitsForStaleCacheRepositoryMutationBeforeAllowingRetry() async throws {
+        let root = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let paths = try AppPaths(baseDirectory: root)
+        try paths.prepareDirectories()
+        let repository = try GRDBUserLibraryRepository(databaseURL: paths.userDatabaseURL)
+        let pausingRepository = PausingUserLibraryRepository(
+            repository: repository,
+            pauseUpserts: false,
+            pauseFirstRemoveDownload: true
+        )
+        let waitObserver = ReservationWaitObserver()
+        let downloader = ControllableDownloadClient(temporaryDirectory: root.appendingPathComponent("Transfers"))
+        let manager = try await CacheManager.make(
+            repository: pausingRepository,
+            downloader: downloader,
+            paths: paths,
+            reservationWaitObserver: { waitObserver.record(trackID: $0) }
+        )
+        let track = makeTrack(id: "stale-repository-remove", reciterID: "r1")
+        try await repository.upsertDownload(CachedDownload(
+            trackID: track.id,
+            reciterID: track.reciterID,
+            relativePath: CacheManager.finalFileName(trackID: track.id),
+            byteCount: 99,
+            etag: nil,
+            updatedAt: .now
+        ))
+
+        let staleCache = Task { try await manager.cache(track: track) }
+        await pausingRepository.waitUntilRemoveDownloadPaused()
+        let clearing = Task { try await manager.clearAll() }
+        waitObserver.waitUntilObserved(trackID: track.id)
+        await pausingRepository.resumeRemoveDownload()
+        try await clearing.value
+        try await manager.retry(trackID: track.id)
+        await downloader.waitUntilStarted(track.url)
+        try await downloader.succeed(track.url, bytes: Data("fresh".utf8), etag: nil)
+        for _ in 0..<200 {
+            if try await repository.download(trackID: track.id) != nil { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        try await staleCache.value
+
+        let persistedDownload = try await repository.download(trackID: track.id)
+        XCTAssertEqual(persistedDownload?.byteCount, 5)
+        XCTAssertEqual(try cacheDirectoryEntries(paths).count, 1)
+    }
+
     func testStartupReconciliationDeletesMissingRowsOrphansAndStagingButKeepsIndexedFile() async throws {
         let root = try temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: root) }
@@ -320,6 +481,24 @@ final class CacheManagerTests: XCTestCase {
     }
 }
 
+private final class ReservationWaitObserver: @unchecked Sendable {
+    private let condition = NSCondition()
+    private var observedTrackIDs: Set<String> = []
+
+    func record(trackID: String) {
+        condition.lock()
+        observedTrackIDs.insert(trackID)
+        condition.broadcast()
+        condition.unlock()
+    }
+
+    func waitUntilObserved(trackID: String) {
+        condition.lock()
+        while !observedTrackIDs.contains(trackID) { condition.wait() }
+        condition.unlock()
+    }
+}
+
 private struct CacheFixture: Sendable {
     let root: URL
     let paths: AppPaths
@@ -407,6 +586,8 @@ private actor PausingUserLibraryRepository: UserLibraryRepository {
     private let pauseFirstDownloadLookup: Bool
     private let pauseAfterUpsertCommit: Bool
     private let pauseAfterDownloadLookupNumber: Int?
+    private let pauseDownloadsCallNumber: Int?
+    private let pauseFirstRemoveDownload: Bool
     private var upsertStarted = false
     private var upsertCancellationObserved = false
     private var startWaiters: [CheckedContinuation<Void, Never>] = []
@@ -421,19 +602,31 @@ private actor PausingUserLibraryRepository: UserLibraryRepository {
     private var pausedDownloadLookupCompleted = false
     private var pausedDownloadLookupWaiters: [CheckedContinuation<Void, Never>] = []
     private var pausedDownloadLookupResumeContinuation: CheckedContinuation<Void, Never>?
+    private var downloadsCallCount = 0
+    private var downloadsPaused = false
+    private var downloadsPausedWaiters: [CheckedContinuation<Void, Never>] = []
+    private var downloadsResumeContinuation: CheckedContinuation<Void, Never>?
+    private var removeDownloadCallCount = 0
+    private var removeDownloadPaused = false
+    private var removeDownloadPausedWaiters: [CheckedContinuation<Void, Never>] = []
+    private var removeDownloadResumeContinuation: CheckedContinuation<Void, Never>?
 
     init(
         repository: GRDBUserLibraryRepository,
         pauseUpserts: Bool = true,
         pauseFirstDownloadLookup: Bool = false,
         pauseAfterUpsertCommit: Bool = false,
-        pauseAfterDownloadLookupNumber: Int? = nil
+        pauseAfterDownloadLookupNumber: Int? = nil,
+        pauseDownloadsCallNumber: Int? = nil,
+        pauseFirstRemoveDownload: Bool = false
     ) {
         self.repository = repository
         self.pauseUpserts = pauseUpserts
         self.pauseFirstDownloadLookup = pauseFirstDownloadLookup
         self.pauseAfterUpsertCommit = pauseAfterUpsertCommit
         self.pauseAfterDownloadLookupNumber = pauseAfterDownloadLookupNumber
+        self.pauseDownloadsCallNumber = pauseDownloadsCallNumber
+        self.pauseFirstRemoveDownload = pauseFirstRemoveDownload
     }
 
     func waitUntilUpsertStarted() async {
@@ -481,6 +674,26 @@ private actor PausingUserLibraryRepository: UserLibraryRepository {
         pausedDownloadLookupResumeContinuation = nil
     }
 
+    func waitUntilDownloadsPaused() async {
+        if downloadsPaused { return }
+        await withCheckedContinuation { downloadsPausedWaiters.append($0) }
+    }
+
+    func resumeDownloads() {
+        downloadsResumeContinuation?.resume()
+        downloadsResumeContinuation = nil
+    }
+
+    func waitUntilRemoveDownloadPaused() async {
+        if removeDownloadPaused { return }
+        await withCheckedContinuation { removeDownloadPausedWaiters.append($0) }
+    }
+
+    func resumeRemoveDownload() {
+        removeDownloadResumeContinuation?.resume()
+        removeDownloadResumeContinuation = nil
+    }
+
     func favoriteReciterIDs() async throws -> Set<String> {
         try await repository.favoriteReciterIDs()
     }
@@ -498,7 +711,15 @@ private actor PausingUserLibraryRepository: UserLibraryRepository {
     }
 
     func downloads() async throws -> [CachedDownload] {
-        try await repository.downloads()
+        downloadsCallCount += 1
+        let result = try await repository.downloads()
+        if downloadsCallCount == pauseDownloadsCallNumber {
+            downloadsPaused = true
+            for waiter in downloadsPausedWaiters { waiter.resume() }
+            downloadsPausedWaiters.removeAll()
+            await withCheckedContinuation { downloadsResumeContinuation = $0 }
+        }
+        return result
     }
 
     func download(trackID: String) async throws -> CachedDownload? {
@@ -551,6 +772,13 @@ private actor PausingUserLibraryRepository: UserLibraryRepository {
     }
 
     func removeDownload(trackID: String) async throws {
+        removeDownloadCallCount += 1
+        if pauseFirstRemoveDownload, removeDownloadCallCount == 1 {
+            removeDownloadPaused = true
+            for waiter in removeDownloadPausedWaiters { waiter.resume() }
+            removeDownloadPausedWaiters.removeAll()
+            await withCheckedContinuation { removeDownloadResumeContinuation = $0 }
+        }
         try await repository.removeDownload(trackID: trackID)
     }
 
