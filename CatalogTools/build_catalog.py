@@ -7,6 +7,7 @@ import hashlib
 import os
 import re
 import sqlite3
+import tempfile
 from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
@@ -76,27 +77,26 @@ class SourceTrack:
 
 def _read_csv(path, required_fields):
     try:
-        source = path.open(encoding="utf-8-sig", newline="")
+        with path.open(encoding="utf-8-sig", newline="") as source:
+            reader = csv.DictReader(source)
+            if reader.fieldnames is None:
+                raise CatalogValidationError(f"{path}: missing CSV header")
+            missing_headers = set(required_fields) - set(reader.fieldnames)
+            if missing_headers:
+                raise CatalogValidationError(
+                    f"{path}: missing CSV fields: {', '.join(sorted(missing_headers))}"
+                )
+            rows = []
+            for line_number, row in enumerate(reader, 2):
+                for field in required_fields:
+                    value = row.get(field)
+                    if value is None or not value.strip():
+                        raise CatalogValidationError(
+                            f"{path}:{line_number}: empty field {field!r}"
+                        )
+                rows.append({field: row[field].strip() for field in required_fields})
     except UnicodeDecodeError as error:
         raise CatalogValidationError(f"{path}: input must be UTF-8") from error
-    with source:
-        reader = csv.DictReader(source)
-        if reader.fieldnames is None:
-            raise CatalogValidationError(f"{path}: missing CSV header")
-        missing_headers = set(required_fields) - set(reader.fieldnames)
-        if missing_headers:
-            raise CatalogValidationError(
-                f"{path}: missing CSV fields: {', '.join(sorted(missing_headers))}"
-            )
-        rows = []
-        for line_number, row in enumerate(reader, 2):
-            for field in required_fields:
-                value = row.get(field)
-                if value is None or not value.strip():
-                    raise CatalogValidationError(
-                        f"{path}:{line_number}: empty field {field!r}"
-                    )
-            rows.append({field: row[field].strip() for field in required_fields})
     return rows
 
 
@@ -316,10 +316,16 @@ def _write_database(
     removed_duplicates,
 ):
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    temporary_path = output_path.with_name(output_path.name + ".tmp")
-    temporary_path.unlink(missing_ok=True)
+    temporary_fd, temporary_name = tempfile.mkstemp(
+        prefix=f".{output_path.name}.",
+        suffix=".tmp",
+        dir=output_path.parent,
+    )
+    os.close(temporary_fd)
+    temporary_path = Path(temporary_name)
     try:
-        with sqlite3.connect(temporary_path) as connection:
+        connection = sqlite3.connect(temporary_path)
+        try:
             connection.execute("PRAGMA page_size = 4096")
             connection.execute("PRAGMA foreign_keys = ON")
             connection.execute("PRAGMA user_version = 1")
@@ -395,8 +401,10 @@ def _write_database(
             )
             connection.commit()
             connection.execute("VACUUM")
+        finally:
+            connection.close()
         os.replace(temporary_path, output_path)
-    except Exception:
+    except BaseException:
         temporary_path.unlink(missing_ok=True)
         raise
 

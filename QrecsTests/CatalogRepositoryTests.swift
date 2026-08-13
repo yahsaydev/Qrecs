@@ -10,6 +10,31 @@ final class CatalogRepositoryTests: XCTestCase {
             .appendingPathComponent("Qrecs/Resources/Catalog/catalog.sqlite")
     }
 
+    private var hostAppBundle: Bundle {
+        let appBundleURL = Bundle(for: CatalogRepositoryTests.self).bundleURL
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        return Bundle(url: appBundleURL)!
+    }
+
+    func testBundledRepositoryLoadsCatalogFromHostAppResources() async throws {
+        XCTAssertNotNil(
+            hostAppBundle.url(forResource: "catalog", withExtension: "sqlite")
+        )
+        let repository = try GRDBCatalogRepository.bundled(in: hostAppBundle)
+
+        let reciters = try await repository.fetchReciters()
+        let surahs = try await repository.fetchSurahs()
+
+        XCTAssertEqual(reciters.count, 172)
+        XCTAssertEqual(surahs.count, 114)
+        XCTAssertEqual(
+            reciters.first(where: { $0.id == "reciter-118" })?.nameEN,
+            "Mustafa Raad Al-Azawi"
+        )
+    }
+
     func testFetchesExpectedCountsAndCanonicalSurahBounds() async throws {
         let repository = try GRDBCatalogRepository(databaseURL: generatedCatalogURL)
 

@@ -1,4 +1,5 @@
 import csv
+import concurrent.futures
 import hashlib
 import shutil
 import sqlite3
@@ -105,6 +106,56 @@ class CatalogBuilderTests(unittest.TestCase):
             hashlib.sha256(second.read_bytes()).digest(),
         )
 
+    def test_parallel_builds_share_output_safely(self):
+        output = self.temp / "catalog.sqlite"
+
+        def run_build(_):
+            return self.build(output=output)
+
+        errors = []
+        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
+            futures = [executor.submit(run_build, index) for index in range(8)]
+            for future in futures:
+                try:
+                    future.result()
+                except Exception as error:
+                    errors.append(f"{type(error).__name__}: {error}")
+
+        self.assertEqual(errors, [])
+        with sqlite3.connect(output) as connection:
+            self.assertEqual(
+                connection.execute("PRAGMA integrity_check").fetchone(),
+                ("ok",),
+            )
+            self.assertEqual(connection.execute("PRAGMA user_version").fetchone(), (1,))
+            self.assertEqual(connection.execute("PRAGMA foreign_key_check").fetchall(), [])
+            self.assertEqual(
+                [
+                    row[0]
+                    for row in connection.execute(
+                        "SELECT name FROM sqlite_schema "
+                        "WHERE type = 'table' ORDER BY name"
+                    )
+                ],
+                ["catalog_meta", "reciters", "surahs", "tracks"],
+            )
+            self.assertEqual(
+                connection.execute("SELECT COUNT(*) FROM reciters").fetchone()[0],
+                172,
+            )
+            self.assertEqual(
+                connection.execute("SELECT COUNT(*) FROM surahs").fetchone()[0],
+                114,
+            )
+            self.assertEqual(
+                connection.execute("SELECT COUNT(*) FROM tracks").fetchone()[0],
+                19_608,
+            )
+        self.assertEqual(
+            sorted(path.name for path in self.temp.iterdir()),
+            ["catalog.sqlite"],
+        )
+
     def test_tajwid_minshawi_keeps_source_key_and_has_cyrillic_display_name(self):
         database = self.build()
         with sqlite3.connect(database) as connection:
@@ -128,6 +179,38 @@ class CatalogBuilderTests(unittest.TestCase):
                 "Salah Bukhatir",
             )
 
+    def test_mustafa_raad_al_azawi_uses_readable_english_spelling(self):
+        database = self.build()
+        with sqlite3.connect(database) as connection:
+            self.assertEqual(
+                connection.execute(
+                    "SELECT name_en FROM reciters WHERE id = 'reciter-118'"
+                ).fetchone()[0],
+                "Mustafa Raad Al-Azawi",
+            )
+
+    def test_checked_in_csv_eol_policy_preserves_source_bytes(self):
+        source_bytes = (DATA / "quran_mp3_links.csv").read_bytes()
+        self.assertEqual(
+            hashlib.sha256(source_bytes).hexdigest(),
+            "0379a8112a8d170359aaeb6a517c555cd9d9d684a8cb0831e3b571e95f349584",
+        )
+        self.assertGreater(source_bytes.count(b"\r\n"), 0)
+        self.assertEqual(source_bytes.count(b"\n"), source_bytes.count(b"\r\n"))
+        for mapping_name in ("reciters.csv", "surahs.csv"):
+            mapping_bytes = (DATA / mapping_name).read_bytes()
+            self.assertNotIn(b"\r\n", mapping_bytes)
+
+        attributes_path = CATALOG_TOOLS.parent / ".gitattributes"
+        attributes = (
+            attributes_path.read_text(encoding="utf-8")
+            if attributes_path.exists()
+            else ""
+        )
+        self.assertIn("CatalogTools/Data/quran_mp3_links.csv -text", attributes)
+        self.assertIn("CatalogTools/Data/reciters.csv text eol=lf", attributes)
+        self.assertIn("CatalogTools/Data/surahs.csv text eol=lf", attributes)
+
     def test_rejects_empty_source_field(self):
         source = self.copy_csv("quran_mp3_links.csv")
         self.rewrite_rows(source, lambda rows: [{**rows[0], "MP3_URL": ""}, *rows[1:]])
@@ -143,6 +226,21 @@ class CatalogBuilderTests(unittest.TestCase):
             ],
         )
         self.assert_validation_error("HTTPS", source=source)
+
+    def test_rejects_malformed_utf8_as_catalog_validation_error(self):
+        source = self.copy_csv("quran_mp3_links.csv")
+        source_bytes = bytearray(source.read_bytes())
+        source_bytes[source_bytes.index(b"\n") + 1] = 0xFF
+        source.write_bytes(source_bytes)
+
+        caught_error = None
+        try:
+            self.build(source=source)
+        except Exception as error:
+            caught_error = error
+
+        self.assertIsInstance(caught_error, CatalogValidationError)
+        self.assertRegex(str(caught_error), "input must be UTF-8")
 
     def test_rejects_surah_number_outside_canonical_range(self):
         source = self.copy_csv("quran_mp3_links.csv")

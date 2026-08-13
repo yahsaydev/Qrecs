@@ -1,0 +1,3 @@
+CatalogTools/Data/quran_mp3_links.csv -text
+CatalogTools/Data/reciters.csv text eol=lf
+CatalogTools/Data/surahs.csv text eol=lf
