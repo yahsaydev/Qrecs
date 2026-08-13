@@ -12,7 +12,19 @@ final class AmbientMixer: AmbientMixing {
         initialState: AmbientMixState = .default
     ) {
         self.backend = backend
-        state = initialState
+        var normalizedState = initialState
+        normalizedState.isPlaying = false
+        normalizedState.failureMessage = nil
+        for sound in AmbientSound.allCases {
+            var channel = normalizedState.channels[sound]
+                ?? AmbientMixState.default.channels[sound]!
+            channel.volume = Self.clamp(channel.volume)
+            normalizedState.channels[sound] = channel
+            backend.setVolume(channel.volume, for: sound)
+        }
+        normalizedState.masterVolume = Self.clamp(normalizedState.masterVolume)
+        backend.setMasterVolume(normalizedState.masterVolume)
+        state = normalizedState
     }
 
     func updates() -> AsyncStream<AmbientMixState> {

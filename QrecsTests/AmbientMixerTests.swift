@@ -15,8 +15,26 @@ final class AmbientMixerTests: XCTestCase {
         XCTAssertEqual(mixer.state.channels[.fire], AmbientChannelState(isEnabled: false, volume: 0.5))
         XCTAssertEqual(mixer.state.masterVolume, 0.55)
         XCTAssertEqual(backend.volumes[.rain], 0.72)
-        XCTAssertEqual(backend.masterVolumes, [0.55])
+        XCTAssertEqual(backend.masterVolumes, [0.5, 0.55])
         XCTAssertEqual(backend.played, [], "Enabling a sound must not autoplay the app")
+    }
+
+    func testInitialStateIsClampedAndAppliedToAudioBackend() {
+        let backend = RecordingAmbientBackend()
+        var initial = AmbientMixState.default
+        initial.channels[.fire]?.volume = 0.82
+        initial.channels[.rain]?.volume = -0.3
+        initial.masterVolume = 1.4
+
+        let mixer = AmbientMixer(backend: backend, initialState: initial)
+
+        XCTAssertEqual(mixer.state.channels[.fire]?.volume, 0.82)
+        XCTAssertEqual(mixer.state.channels[.rain]?.volume, 0)
+        XCTAssertEqual(mixer.state.masterVolume, 1)
+        XCTAssertEqual(backend.volumes.count, AmbientSound.allCases.count)
+        XCTAssertEqual(backend.volumes[.fire], 0.82)
+        XCTAssertEqual(backend.volumes[.rain], 0)
+        XCTAssertEqual(backend.masterVolumes, [1])
     }
 
     func testPlayPauseStopCoordinateEnabledChannelsAndKeepConfiguration() {

@@ -7,8 +7,10 @@ final class QuranPlayer: QuranPlaying {
     private var queue: [Track] = []
     private var currentIndex: Int?
     private var localURLs: [String: URL] = [:]
+    private var currentAudioItemID: QuranAudioItemID?
     private var isNetworkAvailable = true
     private var shouldResumeAfterRetry = false
+    private var retryPosition: TimeInterval?
     private var continuations: [UUID: AsyncStream<PlayerState>.Continuation] = [:]
     private var audioEventTask: Task<Void, Never>?
     private var networkTask: Task<Void, Never>?
@@ -137,10 +139,13 @@ final class QuranPlayer: QuranPlaying {
               isNetworkAvailable,
               state.currentTrack != nil else { return }
         let resume = shouldResumeAfterRetry
+        let position = retryPosition ?? state.elapsed
+        state.elapsed = position
         loadCurrent(playing: false, resetProgress: false)
-        if state.elapsed > 0 {
-            audio.seek(to: state.elapsed)
+        if position > 0 {
+            audio.seek(to: position)
         }
+        retryPosition = nil
         if resume {
             play()
         }
@@ -186,7 +191,9 @@ final class QuranPlayer: QuranPlaying {
             failForNetworkLoss(wasPlaying: playing)
             return
         }
-        audio.load(url: localURL ?? track.url)
+        let itemID = QuranAudioItemID()
+        currentAudioItemID = itemID
+        audio.load(url: localURL ?? track.url, itemID: itemID)
         state.currentTrack = track
         state.source = source
         state.status = playing ? .playing : .paused
@@ -206,6 +213,7 @@ final class QuranPlayer: QuranPlaying {
 
     private func failForNetworkLoss(wasPlaying: Bool) {
         shouldResumeAfterRetry = wasPlaying
+        retryPosition = state.elapsed
         audio.stop()
         ambient.stop()
         state.status = .failed(.networkUnavailable)
@@ -213,14 +221,25 @@ final class QuranPlayer: QuranPlaying {
     }
 
     private func receive(_ event: QuranAudioEvent) {
+        let itemID: QuranAudioItemID
         switch event {
-        case let .progress(elapsed, duration):
+        case let .progress(eventItemID, _, _),
+             let .ended(eventItemID),
+             let .failed(eventItemID, _):
+            itemID = eventItemID
+        }
+        guard itemID == currentAudioItemID else { return }
+
+        switch event {
+        case let .progress(_, elapsed, duration):
+            if case .failed = state.status { return }
             state.elapsed = max(elapsed, 0)
             state.duration = max(duration, 0)
             publish()
         case .ended:
+            guard state.status == .playing else { return }
             advance(automatic: true)
-        case let .failed(message):
+        case let .failed(_, message):
             audio.stop()
             ambient.stop()
             state.status = .failed(.playback(message))

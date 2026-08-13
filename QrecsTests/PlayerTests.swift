@@ -22,21 +22,68 @@ final class PlayerTests: XCTestCase {
         XCTAssertEqual(backend.playCount, 1)
         XCTAssertTrue(ambient.state.isPlaying)
 
-        let secondTrack = await stateAfterEvent(.ended, backend: backend, player: player) {
+        let secondTrack = await stateAfterEvent(backend.endedEvent(), backend: backend, player: player) {
             $0.currentTrack?.surahNumber == 2
         }
         XCTAssertEqual(secondTrack.status, .playing)
         XCTAssertEqual(backend.loadedURLs.last, makeTrack(2).url)
 
-        _ = await stateAfterEvent(.ended, backend: backend, player: player) {
+        _ = await stateAfterEvent(backend.endedEvent(), backend: backend, player: player) {
             $0.currentTrack?.surahNumber == 3
         }
-        let stopped = await stateAfterEvent(.ended, backend: backend, player: player) {
+        let stopped = await stateAfterEvent(backend.endedEvent(), backend: backend, player: player) {
             $0.status == .stopped
         }
         XCTAssertEqual(stopped.currentTrack?.surahNumber, 3)
         XCTAssertEqual(backend.loadedURLs, [makeTrack(1).url, makeTrack(2).url, makeTrack(3).url])
         XCTAssertFalse(ambient.state.isPlaying)
+    }
+
+    func testEndedEventWhilePausedDoesNotAdvanceOrAutoplay() async {
+        let backend = FakeQuranAudioBackend()
+        let ambient = FakeAmbientMixer()
+        let player = QuranPlayer(audio: backend, ambient: ambient)
+        let tracks = [makeTrack(1), makeTrack(2)]
+        player.select(track: tracks[0], queue: tracks, localURLs: [:])
+        let stream = player.updates()
+
+        backend.send(backend.endedEvent())
+        backend.send(backend.progressEvent(elapsed: 7, duration: 100))
+
+        for await state in stream where state.elapsed == 7 {
+            XCTAssertEqual(state.currentTrack, tracks[0])
+            XCTAssertEqual(state.status, .paused)
+            XCTAssertEqual(backend.loadedURLs, [tracks[0].url])
+            XCTAssertEqual(backend.playCount, 0)
+            XCTAssertFalse(ambient.state.isPlaying)
+            return
+        }
+        XCTFail("Player stream ended before the progress barrier")
+    }
+
+    func testStaleEventsFromPreviousAudioItemDoNotAffectCurrentSelection() async {
+        let backend = FakeQuranAudioBackend()
+        let ambient = FakeAmbientMixer()
+        let player = QuranPlayer(audio: backend, ambient: ambient)
+        let tracks = [makeTrack(1), makeTrack(2)]
+        player.select(track: tracks[0], queue: tracks, localURLs: [:])
+        let staleItemID = backend.latestItemID
+        player.select(track: tracks[1], queue: tracks, localURLs: [:])
+        let currentItemID = backend.latestItemID
+        let stream = player.updates()
+
+        backend.send(.ended(itemID: staleItemID))
+        backend.send(.failed(itemID: staleItemID, message: "stale failure"))
+        backend.send(.progress(itemID: currentItemID, elapsed: 9, duration: 100))
+
+        for await state in stream where state.elapsed == 9 {
+            XCTAssertEqual(state.currentTrack, tracks[1])
+            XCTAssertEqual(state.status, .paused)
+            XCTAssertEqual(backend.loadedURLs, [tracks[0].url, tracks[1].url])
+            XCTAssertFalse(ambient.state.isPlaying)
+            return
+        }
+        XCTFail("Player stream ended before the current-item progress barrier")
     }
 
     func testPreviousAndNextRespectQueueBoundsAndPreservePauseState() {
@@ -123,7 +170,7 @@ final class PlayerTests: XCTestCase {
         XCTAssertEqual(ambient.playCount, 2)
 
         let progressed = await stateAfterEvent(
-            .progress(elapsed: 12.5, duration: 120),
+            backend.progressEvent(elapsed: 12.5, duration: 120),
             backend: backend,
             player: player
         ) { $0.elapsed == 12.5 }
@@ -155,6 +202,29 @@ final class PlayerTests: XCTestCase {
         XCTAssertEqual(backend.loadedURLs, [track.url, track.url])
         XCTAssertEqual(backend.playCount, 2)
         XCTAssertEqual(ambient.playCount, 2)
+    }
+
+    func testRetryRestoresPositionCapturedBeforeRemoteNetworkLoss() async {
+        let backend = FakeQuranAudioBackend()
+        let ambient = FakeAmbientMixer()
+        let player = QuranPlayer(audio: backend, ambient: ambient)
+        let track = makeTrack(7)
+        player.select(track: track, queue: [track], localURLs: [:])
+        player.play()
+        _ = await stateAfterEvent(
+            backend.progressEvent(elapsed: 42, duration: 120),
+            backend: backend,
+            player: player
+        ) { $0.elapsed == 42 }
+
+        player.handleNetworkAvailability(false)
+        backend.send(backend.progressEvent(elapsed: 0, duration: 120))
+        player.handleNetworkAvailability(true)
+        player.retry()
+
+        XCTAssertEqual(player.state.status, .playing)
+        XCTAssertEqual(backend.seeks, [42])
+        XCTAssertEqual(player.state.elapsed, 42)
     }
 
     func testLocalPlaybackContinuesAcrossNetworkLoss() {
@@ -209,7 +279,7 @@ final class PlayerTests: XCTestCase {
         player.select(track: tracks[0], queue: tracks, localURLs: [:])
         player.play()
 
-        _ = await stateAfterEvent(.ended, backend: backend, player: player) {
+        _ = await stateAfterEvent(backend.endedEvent(), backend: backend, player: player) {
             $0.currentTrack?.surahNumber == 2
         }
 
@@ -247,12 +317,20 @@ private final class FakeQuranAudioBackend: QuranAudioBackend {
     private(set) var stopCount = 0
     private(set) var seeks: [TimeInterval] = []
     private(set) var volumes: [Float] = []
+    private(set) var loadedItemIDs: [QuranAudioItemID] = []
+
+    var latestItemID: QuranAudioItemID {
+        loadedItemIDs.last!
+    }
 
     init() {
         (stream, continuation) = AsyncStream.makeStream()
     }
 
-    func load(url: URL) { loadedURLs.append(url) }
+    func load(url: URL, itemID: QuranAudioItemID) {
+        loadedURLs.append(url)
+        loadedItemIDs.append(itemID)
+    }
     func play() { playCount += 1 }
     func pause() { pauseCount += 1 }
     func stop() { stopCount += 1 }
@@ -260,6 +338,14 @@ private final class FakeQuranAudioBackend: QuranAudioBackend {
     func setVolume(_ volume: Float) { volumes.append(volume) }
     func events() -> AsyncStream<QuranAudioEvent> { stream }
     func send(_ event: QuranAudioEvent) { continuation.yield(event) }
+
+    func endedEvent() -> QuranAudioEvent {
+        .ended(itemID: latestItemID)
+    }
+
+    func progressEvent(elapsed: TimeInterval, duration: TimeInterval) -> QuranAudioEvent {
+        .progress(itemID: latestItemID, elapsed: elapsed, duration: duration)
+    }
 }
 
 @MainActor

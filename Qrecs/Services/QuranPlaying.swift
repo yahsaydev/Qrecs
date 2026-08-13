@@ -1,14 +1,22 @@
 import Foundation
 
+struct QuranAudioItemID: Equatable, Hashable, Sendable {
+    let rawValue: UUID
+
+    init(rawValue: UUID = UUID()) {
+        self.rawValue = rawValue
+    }
+}
+
 enum QuranAudioEvent: Equatable, Sendable {
-    case progress(elapsed: TimeInterval, duration: TimeInterval)
-    case ended
-    case failed(message: String)
+    case progress(itemID: QuranAudioItemID, elapsed: TimeInterval, duration: TimeInterval)
+    case ended(itemID: QuranAudioItemID)
+    case failed(itemID: QuranAudioItemID, message: String)
 }
 
 @MainActor
 protocol QuranAudioBackend: AnyObject {
-    func load(url: URL)
+    func load(url: URL, itemID: QuranAudioItemID)
     func play()
     func pause()
     func stop()

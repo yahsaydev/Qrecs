@@ -16,6 +16,7 @@ final class AVPlayerAudioBackend: QuranAudioBackend {
     private var endObserver: NSObjectProtocol?
     private var failureObserver: NSObjectProtocol?
     private var timeObserver: AVTimeObserverToken?
+    private var currentItemID: QuranAudioItemID?
 
     init(player: AVPlayer = AVPlayer()) {
         self.player = player
@@ -25,10 +26,11 @@ final class AVPlayerAudioBackend: QuranAudioBackend {
         ) { [weak self] time in
             MainActor.assumeIsolated {
                 guard let self else { return }
+                guard let itemID = self.currentItemID else { return }
                 let elapsed = time.seconds.isFinite ? max(time.seconds, 0) : 0
                 let rawDuration = self.player.currentItem?.duration.seconds ?? 0
                 let duration = rawDuration.isFinite ? max(rawDuration, 0) : 0
-                self.publish(.progress(elapsed: elapsed, duration: duration))
+                self.publish(.progress(itemID: itemID, elapsed: elapsed, duration: duration))
             }
         })
     }
@@ -45,16 +47,23 @@ final class AVPlayerAudioBackend: QuranAudioBackend {
         }
     }
 
-    func load(url: URL) {
+    func load(url: URL, itemID: QuranAudioItemID) {
         removeItemObservers()
         let item = AVPlayerItem(url: url)
+        currentItemID = itemID
         player.replaceCurrentItem(with: item)
         endObserver = NotificationCenter.default.addObserver(
             forName: .AVPlayerItemDidPlayToEndTime,
             object: item,
             queue: .main
-        ) { [weak self] _ in
-            MainActor.assumeIsolated { self?.publish(.ended) }
+        ) { [weak self, weak item] _ in
+            MainActor.assumeIsolated {
+                guard let self,
+                      let item,
+                      item === self.player.currentItem,
+                      itemID == self.currentItemID else { return }
+                self.publish(.ended(itemID: itemID))
+            }
         }
         failureObserver = NotificationCenter.default.addObserver(
             forName: .AVPlayerItemFailedToPlayToEndTime,
@@ -62,8 +71,15 @@ final class AVPlayerAudioBackend: QuranAudioBackend {
             queue: .main
         ) { [weak self, weak item] _ in
             MainActor.assumeIsolated {
-                let error = item?.error
-                self?.publish(.failed(message: error?.localizedDescription ?? "Playback failed."))
+                guard let self,
+                      let item,
+                      item === self.player.currentItem,
+                      itemID == self.currentItemID else { return }
+                let error = item.error
+                self.publish(.failed(
+                    itemID: itemID,
+                    message: error?.localizedDescription ?? "Playback failed."
+                ))
             }
         }
     }
