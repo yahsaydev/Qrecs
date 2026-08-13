@@ -1,0 +1,6 @@
+DerivedData/
+.build/
+.DS_Store
+xcuserdata/
+*.xcuserstate
+.superpowers/
