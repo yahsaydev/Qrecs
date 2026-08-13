@@ -105,6 +105,29 @@ class CatalogBuilderTests(unittest.TestCase):
             hashlib.sha256(second.read_bytes()).digest(),
         )
 
+    def test_tajwid_minshawi_keeps_source_key_and_has_cyrillic_display_name(self):
+        database = self.build()
+        with sqlite3.connect(database) as connection:
+            self.assertEqual(
+                connection.execute(
+                    "SELECT source_name_ru, name_ru FROM reciters WHERE id = 'reciter-055'"
+                ).fetchone(),
+                (
+                    "Sıddık el-Minşavi",
+                    "Мухаммад Сиддик аль-Миншави — Таджвид",
+                ),
+            )
+
+    def test_salah_bukhatir_uses_reviewed_english_spelling(self):
+        database = self.build()
+        with sqlite3.connect(database) as connection:
+            self.assertEqual(
+                connection.execute(
+                    "SELECT name_en FROM reciters WHERE id = 'reciter-155'"
+                ).fetchone()[0],
+                "Salah Bukhatir",
+            )
+
     def test_rejects_empty_source_field(self):
         source = self.copy_csv("quran_mp3_links.csv")
         self.rewrite_rows(source, lambda rows: [{**rows[0], "MP3_URL": ""}, *rows[1:]])
@@ -153,6 +176,24 @@ class CatalogBuilderTests(unittest.TestCase):
 
         self.rewrite_rows(source, corrupt_duplicate)
         self.assert_validation_error("duplicate logical track", source=source)
+
+    def test_rejects_replacing_allowed_mishary_duplicate_with_other_duplicate(self):
+        source = self.copy_csv("quran_mp3_links.csv")
+
+        def replace_allowed_duplicate(rows):
+            rows = [
+                row
+                for row in rows
+                if not (
+                    row["Чтец"] == "Мишари Рашид Алафасы"
+                    and row["Сура"] == "fotiha surasi mp3 фотиха скачать"
+                )
+            ]
+            rows.append({**rows[0], "Сура": "unexpected duplicate title"})
+            return rows
+
+        self.rewrite_rows(source, replace_allowed_duplicate)
+        self.assert_validation_error("unexpected duplicate row", source=source)
 
     def test_rejects_wrong_track_totals(self):
         source = self.copy_csv("quran_mp3_links.csv")

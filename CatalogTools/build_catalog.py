@@ -18,6 +18,33 @@ EXPECTED_SURAHS = 114
 EXPECTED_TRACKS = 19_608
 EXPECTED_REMOVED_DUPLICATES = 5
 SCHEMA_VERSION = 1
+EXPECTED_NOISY_DUPLICATES = {
+    (
+        "Мишари Рашид Алафасы",
+        1,
+        "https://server8.mp3quran.net/afs/001.mp3",
+    ): "fotiha surasi mp3 фотиха скачать",
+    (
+        "Мишари Рашид Алафасы",
+        2,
+        "https://server8.mp3quran.net/afs/002.mp3",
+    ): "baqara surasi mp3 скачать",
+    (
+        "Мишари Рашид Алафасы",
+        18,
+        "https://server8.mp3quran.net/afs/018.mp3",
+    ): "кахф сураси mp3 kahf surasi",
+    (
+        "Мишари Рашид Алафасы",
+        36,
+        "https://server8.mp3quran.net/afs/036.mp3",
+    ): "yasin surasi mp3 скачать",
+    (
+        "Мишари Рашид Алафасы",
+        67,
+        "https://server8.mp3quran.net/afs/067.mp3",
+    ): "mulk surasi mp3 taborak",
+}
 
 
 class CatalogValidationError(ValueError):
@@ -143,6 +170,7 @@ def _load_surahs(path):
 def _load_source_tracks(path):
     rows = _read_csv(path, ("Чтец", "Сура", "Номер_суры", "MP3_URL"))
     exact_tracks = set()
+    titles_by_exact_track = {}
     tracks_by_logical_key = {}
     removed_duplicates = 0
     reciter_url_bases = {}
@@ -153,6 +181,7 @@ def _load_source_tracks(path):
         url = row["MP3_URL"]
         _require_https(url, f"{path}:{line_number}")
         exact_key = (reader, number, url)
+        titles_by_exact_track.setdefault(exact_key, []).append(row["Сура"])
         if exact_key in exact_tracks:
             removed_duplicates += 1
             continue
@@ -166,6 +195,25 @@ def _load_source_tracks(path):
             )
         tracks_by_logical_key[logical_key] = SourceTrack(reader, number, url)
         reciter_url_bases.setdefault(reader, set()).add(url.rsplit("/", 1)[0])
+
+    duplicated_keys = {
+        key for key, titles in titles_by_exact_track.items() if len(titles) > 1
+    }
+    expected_keys = set(EXPECTED_NOISY_DUPLICATES)
+    unexpected_keys = sorted(duplicated_keys - expected_keys)
+    missing_keys = sorted(expected_keys - duplicated_keys)
+    invalid_noisy_titles = sorted(
+        key
+        for key in duplicated_keys & expected_keys
+        if len(titles_by_exact_track[key]) != 2
+        or titles_by_exact_track[key].count(EXPECTED_NOISY_DUPLICATES[key]) != 1
+    )
+    if unexpected_keys or missing_keys or invalid_noisy_titles:
+        raise CatalogValidationError(
+            f"{path}: unexpected duplicate row set; "
+            f"unexpected={unexpected_keys!r}, missing={missing_keys!r}, "
+            f"invalid_noisy_titles={invalid_noisy_titles!r}"
+        )
 
     return list(tracks_by_logical_key.values()), removed_duplicates, reciter_url_bases
 
