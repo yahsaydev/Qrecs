@@ -125,12 +125,14 @@ final class QuranPlayer: QuranPlaying {
         isNetworkAvailable = available
         guard !available, state.source == .remote else { return }
         switch state.status {
-        case .idle, .stopped, .failed:
+        case .idle, .stopped, .failed(.networkUnavailable):
             return
         case .playing:
             failForNetworkLoss(wasPlaying: true)
         case .paused:
             failForNetworkLoss(wasPlaying: false)
+        case .failed:
+            failForNetworkLoss(wasPlaying: shouldResumeAfterRetry)
         }
     }
 
@@ -184,6 +186,10 @@ final class QuranPlayer: QuranPlaying {
         let track = queue[currentIndex]
         let localURL = localURLs[track.id]
         let source: PlaybackSource = localURL == nil ? .remote : .local
+        if resetProgress {
+            state.elapsed = 0
+            state.duration = 0
+        }
         if source == .remote, !isNetworkAvailable {
             state.currentTrack = track
             state.source = source
@@ -197,10 +203,6 @@ final class QuranPlayer: QuranPlaying {
         state.currentTrack = track
         state.source = source
         state.status = playing ? .playing : .paused
-        if resetProgress {
-            state.elapsed = 0
-            state.duration = 0
-        }
         updateNavigationState()
         if playing {
             audio.play()
@@ -214,6 +216,7 @@ final class QuranPlayer: QuranPlaying {
     private func failForNetworkLoss(wasPlaying: Bool) {
         shouldResumeAfterRetry = wasPlaying
         retryPosition = state.elapsed
+        currentAudioItemID = nil
         audio.stop()
         ambient.stop()
         state.status = .failed(.networkUnavailable)
@@ -240,6 +243,7 @@ final class QuranPlayer: QuranPlaying {
             guard state.status == .playing else { return }
             advance(automatic: true)
         case let .failed(_, message):
+            shouldResumeAfterRetry = state.status == .playing
             audio.stop()
             ambient.stop()
             state.status = .failed(.playback(message))

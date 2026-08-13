@@ -47,8 +47,8 @@ final class PlayerTests: XCTestCase {
         player.select(track: tracks[0], queue: tracks, localURLs: [:])
         let stream = player.updates()
 
-        backend.send(backend.endedEvent())
-        backend.send(backend.progressEvent(elapsed: 7, duration: 100))
+        await backend.send(backend.endedEvent())
+        await backend.send(backend.progressEvent(elapsed: 7, duration: 100))
 
         for await state in stream where state.elapsed == 7 {
             XCTAssertEqual(state.currentTrack, tracks[0])
@@ -72,9 +72,9 @@ final class PlayerTests: XCTestCase {
         let currentItemID = backend.latestItemID
         let stream = player.updates()
 
-        backend.send(.ended(itemID: staleItemID))
-        backend.send(.failed(itemID: staleItemID, message: "stale failure"))
-        backend.send(.progress(itemID: currentItemID, elapsed: 9, duration: 100))
+        await backend.send(.ended(itemID: staleItemID))
+        await backend.send(.failed(itemID: staleItemID, message: "stale failure"))
+        await backend.send(.progress(itemID: currentItemID, elapsed: 9, duration: 100))
 
         for await state in stream where state.elapsed == 9 {
             XCTAssertEqual(state.currentTrack, tracks[1])
@@ -204,6 +204,37 @@ final class PlayerTests: XCTestCase {
         XCTAssertEqual(ambient.playCount, 2)
     }
 
+    func testPlaybackFailureThenOfflineTransitionPreservesRetryableNetworkFailure() async {
+        let backend = FakeQuranAudioBackend()
+        let ambient = FakeAmbientMixer()
+        let player = QuranPlayer(audio: backend, ambient: ambient)
+        let track = makeTrack(7)
+        player.select(track: track, queue: [track], localURLs: [:])
+        player.play()
+
+        await backend.sendAndWaitUntilConsumed(backend.failedEvent(message: "connection reset"))
+        XCTAssertEqual(player.state.status, .failed(.playback("connection reset")))
+        player.handleNetworkAvailability(false)
+
+        XCTAssertEqual(player.state.status, .failed(.networkUnavailable))
+        XCTAssertTrue(player.state.canRetry)
+    }
+
+    func testOfflineTransitionThenPlaybackFailureKeepsNetworkFailure() async {
+        let backend = FakeQuranAudioBackend()
+        let ambient = FakeAmbientMixer()
+        let player = QuranPlayer(audio: backend, ambient: ambient)
+        let track = makeTrack(7)
+        player.select(track: track, queue: [track], localURLs: [:])
+        player.play()
+
+        player.handleNetworkAvailability(false)
+        await backend.sendAndWaitUntilConsumed(backend.failedEvent(message: "cancelled by stop"))
+
+        XCTAssertEqual(player.state.status, .failed(.networkUnavailable))
+        XCTAssertTrue(player.state.canRetry)
+    }
+
     func testRetryRestoresPositionCapturedBeforeRemoteNetworkLoss() async {
         let backend = FakeQuranAudioBackend()
         let ambient = FakeAmbientMixer()
@@ -218,13 +249,46 @@ final class PlayerTests: XCTestCase {
         ) { $0.elapsed == 42 }
 
         player.handleNetworkAvailability(false)
-        backend.send(backend.progressEvent(elapsed: 0, duration: 120))
+        await backend.sendAndWaitUntilConsumed(
+            backend.progressEvent(elapsed: 0, duration: 120)
+        )
+        XCTAssertEqual(player.state.status, .failed(.networkUnavailable))
+        XCTAssertEqual(player.state.elapsed, 42)
         player.handleNetworkAvailability(true)
         player.retry()
 
         XCTAssertEqual(player.state.status, .playing)
         XCTAssertEqual(backend.seeks, [42])
         XCTAssertEqual(player.state.elapsed, 42)
+    }
+
+    func testSelectingNextRemoteTrackWhileOfflineResetsRetryPosition() async {
+        let backend = FakeQuranAudioBackend()
+        let ambient = FakeAmbientMixer()
+        let player = QuranPlayer(audio: backend, ambient: ambient)
+        let tracks = [makeTrack(1), makeTrack(2)]
+        player.select(track: tracks[0], queue: tracks, localURLs: [:])
+        player.play()
+        _ = await stateAfterEvent(
+            backend.progressEvent(elapsed: 42, duration: 120),
+            backend: backend,
+            player: player
+        ) { $0.elapsed == 42 }
+
+        player.handleNetworkAvailability(false)
+        player.next()
+
+        XCTAssertEqual(player.state.currentTrack, tracks[1])
+        XCTAssertEqual(player.state.status, .failed(.networkUnavailable))
+        XCTAssertEqual(player.state.elapsed, 0)
+        XCTAssertEqual(player.state.duration, 0)
+
+        player.handleNetworkAvailability(true)
+        player.retry()
+
+        XCTAssertEqual(backend.loadedURLs.last, tracks[1].url)
+        XCTAssertEqual(backend.seeks, [])
+        XCTAssertEqual(player.state.elapsed, 0)
     }
 
     func testLocalPlaybackContinuesAcrossNetworkLoss() {
@@ -298,7 +362,7 @@ final class PlayerTests: XCTestCase {
         matching predicate: @escaping @Sendable (PlayerState) -> Bool
     ) async -> PlayerState {
         let stream = player.updates()
-        backend.send(event)
+        await backend.send(event)
         for await state in stream where predicate(state) {
             return state
         }
@@ -309,8 +373,7 @@ final class PlayerTests: XCTestCase {
 
 @MainActor
 private final class FakeQuranAudioBackend: QuranAudioBackend {
-    private let stream: AsyncStream<QuranAudioEvent>
-    private let continuation: AsyncStream<QuranAudioEvent>.Continuation
+    private let eventQueue = TestAudioEventQueue()
     private(set) var loadedURLs: [URL] = []
     private(set) var playCount = 0
     private(set) var pauseCount = 0
@@ -323,10 +386,6 @@ private final class FakeQuranAudioBackend: QuranAudioBackend {
         loadedItemIDs.last!
     }
 
-    init() {
-        (stream, continuation) = AsyncStream.makeStream()
-    }
-
     func load(url: URL, itemID: QuranAudioItemID) {
         loadedURLs.append(url)
         loadedItemIDs.append(itemID)
@@ -336,8 +395,18 @@ private final class FakeQuranAudioBackend: QuranAudioBackend {
     func stop() { stopCount += 1 }
     func seek(to seconds: TimeInterval) { seeks.append(seconds) }
     func setVolume(_ volume: Float) { volumes.append(volume) }
-    func events() -> AsyncStream<QuranAudioEvent> { stream }
-    func send(_ event: QuranAudioEvent) { continuation.yield(event) }
+    func events() -> AsyncStream<QuranAudioEvent> {
+        let eventQueue = eventQueue
+        return AsyncStream(unfolding: { await eventQueue.next() })
+    }
+
+    func send(_ event: QuranAudioEvent) async {
+        await eventQueue.send(event)
+    }
+
+    func sendAndWaitUntilConsumed(_ event: QuranAudioEvent) async {
+        await eventQueue.sendAndWaitUntilConsumed(event)
+    }
 
     func endedEvent() -> QuranAudioEvent {
         .ended(itemID: latestItemID)
@@ -345,6 +414,62 @@ private final class FakeQuranAudioBackend: QuranAudioBackend {
 
     func progressEvent(elapsed: TimeInterval, duration: TimeInterval) -> QuranAudioEvent {
         .progress(itemID: latestItemID, elapsed: elapsed, duration: duration)
+    }
+
+    func failedEvent(message: String) -> QuranAudioEvent {
+        .failed(itemID: latestItemID, message: message)
+    }
+}
+
+private actor TestAudioEventQueue {
+    private enum Entry {
+        case event(QuranAudioEvent)
+        case consumptionBarrier(CheckedContinuation<Void, Never>)
+    }
+
+    private var entries: [Entry] = []
+    private var nextWaiter: CheckedContinuation<QuranAudioEvent?, Never>?
+
+    func send(_ event: QuranAudioEvent) {
+        entries.append(.event(event))
+        deliverIfPossible()
+    }
+
+    func sendAndWaitUntilConsumed(_ event: QuranAudioEvent) async {
+        await withCheckedContinuation { continuation in
+            entries.append(.event(event))
+            entries.append(.consumptionBarrier(continuation))
+            deliverIfPossible()
+        }
+    }
+
+    func next() async -> QuranAudioEvent? {
+        while !entries.isEmpty {
+            switch entries.removeFirst() {
+            case let .event(event):
+                return event
+            case let .consumptionBarrier(continuation):
+                continuation.resume()
+            }
+        }
+        return await withCheckedContinuation { continuation in
+            nextWaiter = continuation
+            deliverIfPossible()
+        }
+    }
+
+    private func deliverIfPossible() {
+        guard let nextWaiter else { return }
+        while !entries.isEmpty {
+            switch entries.removeFirst() {
+            case let .event(event):
+                self.nextWaiter = nil
+                nextWaiter.resume(returning: event)
+                return
+            case let .consumptionBarrier(continuation):
+                continuation.resume()
+            }
+        }
     }
 }
 
