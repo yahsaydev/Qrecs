@@ -5,3 +5,6 @@ DerivedData/
 xcuserdata/
 *.xcuserstate
 .superpowers/
+outputs/
+dist/
+.release-build/
