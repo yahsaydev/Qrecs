@@ -24,7 +24,6 @@ final class CacheManagerTests: XCTestCase {
         XCTAssertEqual(try cacheDirectoryEntries(fixture.paths), [cached.relativePath])
 
         try await fixture.manager.cache(track: track)
-        try await Task.sleep(for: .milliseconds(50))
         let startCount = await fixture.downloader.startCount(for: track.url)
         XCTAssertEqual(startCount, 1)
     }
@@ -216,7 +215,6 @@ final class CacheManagerTests: XCTestCase {
         try await manager.cache(track: track)
         await pausingRepository.resumeDownloads()
         try await clearing.value
-        try await Task.sleep(for: .milliseconds(20))
 
         let startsAfterClear = await downloader.startCount(for: track.url)
         XCTAssertEqual(startsAfterClear, 0)
@@ -227,10 +225,7 @@ final class CacheManagerTests: XCTestCase {
         try await manager.retry(trackID: track.id)
         await downloader.waitUntilStarted(track.url)
         try await downloader.succeed(track.url, bytes: Data("retry".utf8), etag: nil)
-        for _ in 0..<200 {
-            if try await repository.download(trackID: track.id) != nil { break }
-            try await Task.sleep(for: .milliseconds(10))
-        }
+        _ = try await awaitCached(manager: manager, trackID: track.id)
         let retriedDownload = try await repository.download(trackID: track.id)
         XCTAssertEqual(retriedDownload?.byteCount, 5)
     }
@@ -253,17 +248,13 @@ final class CacheManagerTests: XCTestCase {
         try await manager.cache(track: oldTrack)
         await downloader.waitUntilStarted(oldTrack.url)
         try await downloader.succeed(oldTrack.url, bytes: Data("old".utf8), etag: nil)
-        for _ in 0..<200 {
-            if try await repository.download(trackID: oldTrack.id) != nil { break }
-            try await Task.sleep(for: .milliseconds(10))
-        }
+        _ = try await awaitCached(manager: manager, trackID: oldTrack.id)
 
         let removing = Task { try await manager.removeAll(reciterID: "r1") }
         await pausingRepository.waitUntilDownloadsPaused()
         try await manager.cache(track: newTrack)
         await pausingRepository.resumeDownloads()
         try await removing.value
-        try await Task.sleep(for: .milliseconds(20))
 
         let newStarts = await downloader.startCount(for: newTrack.url)
         XCTAssertEqual(newStarts, 0)
@@ -289,17 +280,13 @@ final class CacheManagerTests: XCTestCase {
         try await manager.cache(track: track)
         await downloader.waitUntilStarted(track.url)
         try await downloader.succeed(track.url, bytes: Data("old".utf8), etag: nil)
-        for _ in 0..<200 {
-            if try await repository.download(trackID: track.id) != nil { break }
-            try await Task.sleep(for: .milliseconds(10))
-        }
+        _ = try await awaitCached(manager: manager, trackID: track.id)
 
         let removing = Task { try await manager.remove(trackID: track.id) }
         await pausingRepository.waitUntilRemoveDownloadPaused()
         try await manager.cache(track: track)
         await pausingRepository.resumeRemoveDownload()
         try await removing.value
-        try await Task.sleep(for: .milliseconds(20))
 
         let starts = await downloader.startCount(for: track.url)
         XCTAssertEqual(starts, 1)
@@ -346,10 +333,7 @@ final class CacheManagerTests: XCTestCase {
         try await manager.retry(trackID: track.id)
         await downloader.waitUntilStarted(track.url)
         try await downloader.succeed(track.url, bytes: Data("fresh".utf8), etag: nil)
-        for _ in 0..<200 {
-            if try await repository.download(trackID: track.id) != nil { break }
-            try await Task.sleep(for: .milliseconds(10))
-        }
+        _ = try await awaitCached(manager: manager, trackID: track.id)
         try await staleCache.value
 
         let persistedDownload = try await repository.download(trackID: track.id)
@@ -400,7 +384,6 @@ final class CacheManagerTests: XCTestCase {
         for track in tracks { try await fixture.manager.cache(track: track) }
         await fixture.downloader.waitUntilStarted(tracks[0].url)
         await fixture.downloader.waitUntilStarted(tracks[1].url)
-        try await Task.sleep(for: .milliseconds(50))
         let thirdStartCount = await fixture.downloader.startCount(for: tracks[2].url)
         let initialMaximum = await fixture.downloader.maximumConcurrentDownloads()
         XCTAssertEqual(thirdStartCount, 0)
@@ -447,15 +430,11 @@ final class CacheManagerTests: XCTestCase {
         await pausingRepository.resumeFirstDownloadLookup()
         try await firstRequest.value
         await downloader.waitUntilStarted(track.url)
-        try await Task.sleep(for: .milliseconds(20))
 
         let startCount = await downloader.startCount(for: track.url)
         XCTAssertEqual(startCount, 1)
         try await downloader.succeed(track.url, bytes: Data("one".utf8), etag: nil)
-        for _ in 0..<200 {
-            if case .cached = await manager.state(trackID: track.id) { break }
-            try await Task.sleep(for: .milliseconds(10))
-        }
+        _ = try await awaitCached(manager: manager, trackID: track.id)
         let stored = try await repository.download(trackID: track.id)
         XCTAssertEqual(stored?.byteCount, 3)
         XCTAssertEqual(try cacheDirectoryEntries(paths).count, 1)
@@ -499,6 +478,30 @@ private final class ReservationWaitObserver: @unchecked Sendable {
     }
 }
 
+private enum CacheStateWaitError: Error {
+    case terminalState(CacheDownloadState)
+    case streamEnded
+}
+
+private func awaitCached(
+    manager: CacheManager,
+    trackID: String
+) async throws -> CachedDownload {
+    for await state in await manager.events(for: trackID) {
+        switch state {
+        case let .cached(download):
+            return download
+        case .cancelled, .failed:
+            XCTFail("Reached terminal state while waiting for cached track \(trackID): \(state)")
+            throw CacheStateWaitError.terminalState(state)
+        case .queued, .downloading:
+            continue
+        }
+    }
+    XCTFail("State stream ended before track was cached: \(trackID)")
+    throw CacheStateWaitError.streamEnded
+}
+
 private struct CacheFixture: Sendable {
     let root: URL
     let paths: AppPaths
@@ -520,12 +523,7 @@ private struct CacheFixture: Sendable {
     }
 
     func waitUntilCached(_ trackID: String) async throws -> CachedDownload {
-        for _ in 0..<200 {
-            if case let .cached(download) = await manager.state(trackID: trackID) { return download }
-            try await Task.sleep(for: .milliseconds(10))
-        }
-        XCTFail("Timed out waiting for cached state: \(trackID)")
-        throw CancellationError()
+        try await awaitCached(manager: manager, trackID: trackID)
     }
 }
 
@@ -533,6 +531,9 @@ private actor ControllableDownloadClient: DownloadClient {
     private let temporaryDirectory: URL
     private var continuations: [URL: AsyncThrowingStream<DownloadEvent, Error>.Continuation] = [:]
     private var starts: [URL: Int] = [:]
+    private var startWaiters: [
+        URL: [(expected: Int, continuation: CheckedContinuation<Void, Never>)]
+    ] = [:]
     private var active: Set<URL> = []
     private var maximumActive = 0
 
@@ -542,6 +543,7 @@ private actor ControllableDownloadClient: DownloadClient {
 
     func events(for url: URL) -> AsyncThrowingStream<DownloadEvent, Error> {
         starts[url, default: 0] += 1
+        resumeSatisfiedStartWaiters(for: url)
         active.insert(url)
         maximumActive = max(maximumActive, active.count)
         let (stream, continuation) = AsyncThrowingStream<DownloadEvent, Error>.makeStream()
@@ -571,7 +573,25 @@ private actor ControllableDownloadClient: DownloadClient {
     }
 
     func waitUntilStartCount(_ expected: Int, for url: URL) async {
-        while starts[url, default: 0] < expected { await Task.yield() }
+        guard starts[url, default: 0] < expected else { return }
+        await withCheckedContinuation {
+            startWaiters[url, default: []].append((expected, $0))
+        }
+    }
+
+    private func resumeSatisfiedStartWaiters(for url: URL) {
+        guard let waiters = startWaiters.removeValue(forKey: url) else { return }
+        var remaining: [(expected: Int, continuation: CheckedContinuation<Void, Never>)] = []
+        for waiter in waiters {
+            if starts[url, default: 0] >= waiter.expected {
+                waiter.continuation.resume()
+            } else {
+                remaining.append(waiter)
+            }
+        }
+        if !remaining.isEmpty {
+            startWaiters[url] = remaining
+        }
     }
 
     private func terminated(_ url: URL) {

@@ -1,5 +1,11 @@
 import Foundation
 
+/// Receives completion of the synchronous cleanup attempt for a validated
+/// temporary download that was abandoned before a consumer claimed ownership.
+protocol DownloadTemporaryFileCleanupObserving: Sendable {
+    func didFinishTemporaryFileCleanup(at fileURL: URL)
+}
+
 struct DownloadProgress: Equatable, Sendable {
     let bytesReceived: Int64
     let totalBytesExpected: Int64?
@@ -16,11 +22,19 @@ struct DownloadedFile: Equatable, Sendable {
     let etag: String?
     private let lease: DownloadedFileLease
 
-    init(fileURL: URL, byteCount: Int64, etag: String?) {
+    init(
+        fileURL: URL,
+        byteCount: Int64,
+        etag: String?,
+        cleanupObserver: (any DownloadTemporaryFileCleanupObserving)? = nil
+    ) {
         self.fileURL = fileURL
         self.byteCount = byteCount
         self.etag = etag
-        self.lease = DownloadedFileLease(fileURL: fileURL)
+        self.lease = DownloadedFileLease(
+            fileURL: fileURL,
+            cleanupObserver: cleanupObserver
+        )
     }
 
     /// Transfers cleanup responsibility from the downloader to the cache manager.
@@ -41,10 +55,15 @@ struct DownloadedFile: Equatable, Sendable {
 private final class DownloadedFileLease: @unchecked Sendable {
     private let lock = NSLock()
     private let fileURL: URL
+    private let cleanupObserver: (any DownloadTemporaryFileCleanupObserving)?
     private var isClaimed = false
 
-    init(fileURL: URL) {
+    init(
+        fileURL: URL,
+        cleanupObserver: (any DownloadTemporaryFileCleanupObserving)?
+    ) {
         self.fileURL = fileURL
+        self.cleanupObserver = cleanupObserver
     }
 
     func claim() {
@@ -55,6 +74,7 @@ private final class DownloadedFileLease: @unchecked Sendable {
         let shouldRemove = lock.withLock { !isClaimed }
         if shouldRemove {
             try? FileManager.default.removeItem(at: fileURL)
+            cleanupObserver?.didFinishTemporaryFileCleanup(at: fileURL)
         }
     }
 }
@@ -85,16 +105,19 @@ struct URLSessionDownloadClient: DownloadClient, Sendable {
     private let configuration: URLSessionConfiguration
     private let temporaryDirectory: URL
     private let handoffGate: (any DownloadHandoffGating)?
+    private let cleanupObserver: (any DownloadTemporaryFileCleanupObserving)?
 
     init(
         configuration: URLSessionConfiguration = .default,
         temporaryDirectory: URL = FileManager.default.temporaryDirectory
             .appendingPathComponent("QrecsDownloads", isDirectory: true),
-        handoffGate: (any DownloadHandoffGating)? = nil
+        handoffGate: (any DownloadHandoffGating)? = nil,
+        cleanupObserver: (any DownloadTemporaryFileCleanupObserving)? = nil
     ) {
         self.configuration = configuration.copy() as! URLSessionConfiguration
         self.temporaryDirectory = temporaryDirectory
         self.handoffGate = handoffGate
+        self.cleanupObserver = cleanupObserver
     }
 
     func events(for url: URL) async -> AsyncThrowingStream<DownloadEvent, Error> {
@@ -102,6 +125,7 @@ struct URLSessionDownloadClient: DownloadClient, Sendable {
         let delegate = DownloadDelegateBridge(
             temporaryDirectory: temporaryDirectory,
             handoffGate: handoffGate,
+            cleanupObserver: cleanupObserver,
             continuation: continuation
         )
         let session = URLSession(
@@ -126,6 +150,7 @@ private final class DownloadDelegateBridge: NSObject, URLSessionDownloadDelegate
     private let lock = NSLock()
     private let temporaryDirectory: URL
     private let handoffGate: (any DownloadHandoffGating)?
+    private let cleanupObserver: (any DownloadTemporaryFileCleanupObserving)?
     private var continuation: AsyncThrowingStream<DownloadEvent, Error>.Continuation?
     private var session: URLSession?
     private var task: URLSessionDownloadTask?
@@ -135,10 +160,12 @@ private final class DownloadDelegateBridge: NSObject, URLSessionDownloadDelegate
     init(
         temporaryDirectory: URL,
         handoffGate: (any DownloadHandoffGating)?,
+        cleanupObserver: (any DownloadTemporaryFileCleanupObserving)?,
         continuation: AsyncThrowingStream<DownloadEvent, Error>.Continuation
     ) {
         self.temporaryDirectory = temporaryDirectory
         self.handoffGate = handoffGate
+        self.cleanupObserver = cleanupObserver
         self.continuation = continuation
     }
 
@@ -199,7 +226,8 @@ private final class DownloadDelegateBridge: NSObject, URLSessionDownloadDelegate
             let file = DownloadedFile(
                 fileURL: destination,
                 byteCount: Int64(byteCount),
-                etag: response.value(forHTTPHeaderField: "ETag")
+                etag: response.value(forHTTPHeaderField: "ETag"),
+                cleanupObserver: cleanupObserver
             )
             lock.withLock { movedFileURL = destination }
             result = .success(file)

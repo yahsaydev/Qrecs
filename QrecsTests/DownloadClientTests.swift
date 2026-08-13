@@ -93,10 +93,12 @@ final class DownloadClientTests: XCTestCase {
         let directory = try temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
         let gate = BlockingDownloadHandoffGate()
+        let cleanupObserver = TemporaryFileCleanupObserver()
         let client = URLSessionDownloadClient(
             configuration: stubConfiguration(),
             temporaryDirectory: directory,
-            handoffGate: gate
+            handoffGate: gate,
+            cleanupObserver: cleanupObserver
         )
         let stream = await client.events(for: URL(string: "https://qrecs.test/handoff.mp3")!)
         let consumer = Task {
@@ -109,10 +111,7 @@ final class DownloadClientTests: XCTestCase {
         consumer.cancel()
         gate.release()
         await consumer.value
-        for _ in 0..<200 {
-            if try FileManager.default.contentsOfDirectory(atPath: directory.path).isEmpty { break }
-            try await Task.sleep(for: .milliseconds(10))
-        }
+        await cleanupObserver.waitUntilCleaned()
 
         XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: directory.path), [])
     }
@@ -128,6 +127,39 @@ final class DownloadClientTests: XCTestCase {
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         return directory
+    }
+}
+
+private final class TemporaryFileCleanupObserver:
+    DownloadTemporaryFileCleanupObserving,
+    @unchecked Sendable
+{
+    private let lock = NSLock()
+    private var cleaned = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    func didFinishTemporaryFileCleanup(at fileURL: URL) {
+        let pending = lock.withLock {
+            cleaned = true
+            defer { waiters.removeAll() }
+            return waiters
+        }
+        for waiter in pending {
+            waiter.resume()
+        }
+    }
+
+    func waitUntilCleaned() async {
+        await withCheckedContinuation { continuation in
+            let shouldResume = lock.withLock {
+                if cleaned { return true }
+                waiters.append(continuation)
+                return false
+            }
+            if shouldResume {
+                continuation.resume()
+            }
+        }
     }
 }
 
