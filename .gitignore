@@ -1,4 +1,5 @@
 DerivedData/
+.build-cache/
 .build/
 .DS_Store
 xcuserdata/
