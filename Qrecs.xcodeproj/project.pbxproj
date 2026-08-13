@@ -15,6 +15,13 @@
 		100000000000000000000006 /* QrecsUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000008 /* QrecsUITests.swift */; };
 		100000000000000000000007 /* GRDB in Frameworks */ = {isa = PBXBuildFile; productRef = D00000000000000000000001 /* GRDB */; };
 		100000000000000000000008 /* RootConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000000B /* RootConfiguration.swift */; };
+		100000000000000000000009 /* CatalogRepositoryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000000C /* CatalogRepositoryTests.swift */; };
+		10000000000000000000000A /* Reciter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000000D /* Reciter.swift */; };
+		10000000000000000000000B /* Surah.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000000E /* Surah.swift */; };
+		10000000000000000000000C /* Track.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20000000000000000000000F /* Track.swift */; };
+		10000000000000000000000D /* CatalogRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000010 /* CatalogRepository.swift */; };
+		10000000000000000000000E /* GRDBCatalogRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000011 /* GRDBCatalogRepository.swift */; };
+		10000000000000000000000F /* catalog.sqlite in Resources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000012 /* catalog.sqlite */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -46,6 +53,13 @@
 		200000000000000000000009 /* QrecsTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = QrecsTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		20000000000000000000000A /* QrecsUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = QrecsUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		20000000000000000000000B /* RootConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootConfiguration.swift; sourceTree = "<group>"; };
+		20000000000000000000000C /* CatalogRepositoryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CatalogRepositoryTests.swift; sourceTree = "<group>"; };
+		20000000000000000000000D /* Reciter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Reciter.swift; sourceTree = "<group>"; };
+		20000000000000000000000E /* Surah.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Surah.swift; sourceTree = "<group>"; };
+		20000000000000000000000F /* Track.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Track.swift; sourceTree = "<group>"; };
+		200000000000000000000010 /* CatalogRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CatalogRepository.swift; sourceTree = "<group>"; };
+		200000000000000000000011 /* GRDBCatalogRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GRDBCatalogRepository.swift; sourceTree = "<group>"; };
+		200000000000000000000012 /* catalog.sqlite */ = {isa = PBXFileReference; lastKnownFileType = file; path = catalog.sqlite; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -136,12 +150,30 @@
 			isa = PBXGroup;
 			children = (
 				200000000000000000000004 /* Assets.xcassets */,
+				70000000000000000000000F /* Catalog */,
 			);
 			path = Resources;
 			sourceTree = "<group>";
 		};
-		700000000000000000000007 /* Models */ = {isa = PBXGroup; children = (); path = Models; sourceTree = "<group>"; };
-		700000000000000000000008 /* Services */ = {isa = PBXGroup; children = (); path = Services; sourceTree = "<group>"; };
+		700000000000000000000007 /* Models */ = {
+			isa = PBXGroup;
+			children = (
+				20000000000000000000000D /* Reciter.swift */,
+				20000000000000000000000E /* Surah.swift */,
+				20000000000000000000000F /* Track.swift */,
+			);
+			path = Models;
+			sourceTree = "<group>";
+		};
+		700000000000000000000008 /* Services */ = {
+			isa = PBXGroup;
+			children = (
+				200000000000000000000010 /* CatalogRepository.swift */,
+				200000000000000000000011 /* GRDBCatalogRepository.swift */,
+			);
+			path = Services;
+			sourceTree = "<group>";
+		};
 		700000000000000000000009 /* Stores */ = {isa = PBXGroup; children = (); path = Stores; sourceTree = "<group>"; };
 		70000000000000000000000A /* Support */ = {
 			isa = PBXGroup;
@@ -154,6 +186,7 @@
 		70000000000000000000000B /* QrecsTests */ = {
 			isa = PBXGroup;
 			children = (
+				20000000000000000000000C /* CatalogRepositoryTests.swift */,
 				200000000000000000000006 /* RootConfigurationTests.swift */,
 			);
 			path = QrecsTests;
@@ -175,6 +208,14 @@
 				20000000000000000000000A /* QrecsUITests.xctest */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		70000000000000000000000F /* Catalog */ = {
+			isa = PBXGroup;
+			children = (
+				200000000000000000000012 /* catalog.sqlite */,
+			);
+			path = Catalog;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -280,6 +321,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				100000000000000000000004 /* Assets.xcassets in Resources */,
+				10000000000000000000000F /* catalog.sqlite in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -293,8 +335,13 @@
 			buildActionMask = 2147483647;
 			files = (
 				100000000000000000000001 /* QrecsApp.swift in Sources */,
+				10000000000000000000000D /* CatalogRepository.swift in Sources */,
+				10000000000000000000000E /* GRDBCatalogRepository.swift in Sources */,
+				10000000000000000000000A /* Reciter.swift in Sources */,
 				100000000000000000000002 /* RootView.swift in Sources */,
 				100000000000000000000003 /* SettingsView.swift in Sources */,
+				10000000000000000000000B /* Surah.swift in Sources */,
+				10000000000000000000000C /* Track.swift in Sources */,
 				100000000000000000000008 /* RootConfiguration.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -303,6 +350,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				100000000000000000000009 /* CatalogRepositoryTests.swift in Sources */,
 				100000000000000000000005 /* RootConfigurationTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
