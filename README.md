@@ -28,3 +28,11 @@ Run the builder validation and corruption tests with:
 ```sh
 python3 -m unittest discover -s CatalogTools/Tests -v
 ```
+
+## User data
+
+Qrecs keeps mutable user data separate from the bundled read-only catalog.
+Favorites and completed-download metadata live in
+`Application Support/Qrecs/UserData/user.sqlite`; user-requested offline audio
+lives in `Application Support/Qrecs/AudioCache`. The app does not place offline
+audio in the system Caches directory or evict it automatically.

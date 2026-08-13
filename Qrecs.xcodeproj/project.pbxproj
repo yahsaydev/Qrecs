@@ -22,6 +22,19 @@
 		10000000000000000000000D /* CatalogRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000010 /* CatalogRepository.swift */; };
 		10000000000000000000000E /* GRDBCatalogRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000011 /* GRDBCatalogRepository.swift */; };
 		10000000000000000000000F /* catalog.sqlite in Resources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000012 /* catalog.sqlite */; };
+		110000000000000000000001 /* AppPathsAndOfflinePolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 210000000000000000000001 /* AppPathsAndOfflinePolicyTests.swift */; };
+		110000000000000000000002 /* UserLibraryRepositoryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 210000000000000000000002 /* UserLibraryRepositoryTests.swift */; };
+		110000000000000000000003 /* DownloadClientTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 210000000000000000000003 /* DownloadClientTests.swift */; };
+		110000000000000000000004 /* CacheManagerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 210000000000000000000004 /* CacheManagerTests.swift */; };
+		110000000000000000000005 /* AppPaths.swift in Sources */ = {isa = PBXBuildFile; fileRef = 210000000000000000000005 /* AppPaths.swift */; };
+		110000000000000000000006 /* CachedDownload.swift in Sources */ = {isa = PBXBuildFile; fileRef = 210000000000000000000006 /* CachedDownload.swift */; };
+		110000000000000000000007 /* CacheState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 210000000000000000000007 /* CacheState.swift */; };
+		110000000000000000000008 /* UserLibraryRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 210000000000000000000008 /* UserLibraryRepository.swift */; };
+		110000000000000000000009 /* GRDBUserLibraryRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 210000000000000000000009 /* GRDBUserLibraryRepository.swift */; };
+		11000000000000000000000A /* DownloadClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 21000000000000000000000A /* DownloadClient.swift */; };
+		11000000000000000000000B /* NetworkMonitoring.swift in Sources */ = {isa = PBXBuildFile; fileRef = 21000000000000000000000B /* NetworkMonitoring.swift */; };
+		11000000000000000000000C /* CacheManaging.swift in Sources */ = {isa = PBXBuildFile; fileRef = 21000000000000000000000C /* CacheManaging.swift */; };
+		11000000000000000000000D /* CacheManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 21000000000000000000000D /* CacheManager.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -60,6 +73,19 @@
 		200000000000000000000010 /* CatalogRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CatalogRepository.swift; sourceTree = "<group>"; };
 		200000000000000000000011 /* GRDBCatalogRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GRDBCatalogRepository.swift; sourceTree = "<group>"; };
 		200000000000000000000012 /* catalog.sqlite */ = {isa = PBXFileReference; lastKnownFileType = file; path = catalog.sqlite; sourceTree = "<group>"; };
+		210000000000000000000001 /* AppPathsAndOfflinePolicyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppPathsAndOfflinePolicyTests.swift; sourceTree = "<group>"; };
+		210000000000000000000002 /* UserLibraryRepositoryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UserLibraryRepositoryTests.swift; sourceTree = "<group>"; };
+		210000000000000000000003 /* DownloadClientTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DownloadClientTests.swift; sourceTree = "<group>"; };
+		210000000000000000000004 /* CacheManagerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CacheManagerTests.swift; sourceTree = "<group>"; };
+		210000000000000000000005 /* AppPaths.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppPaths.swift; sourceTree = "<group>"; };
+		210000000000000000000006 /* CachedDownload.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CachedDownload.swift; sourceTree = "<group>"; };
+		210000000000000000000007 /* CacheState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CacheState.swift; sourceTree = "<group>"; };
+		210000000000000000000008 /* UserLibraryRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UserLibraryRepository.swift; sourceTree = "<group>"; };
+		210000000000000000000009 /* GRDBUserLibraryRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GRDBUserLibraryRepository.swift; sourceTree = "<group>"; };
+		21000000000000000000000A /* DownloadClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DownloadClient.swift; sourceTree = "<group>"; };
+		21000000000000000000000B /* NetworkMonitoring.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetworkMonitoring.swift; sourceTree = "<group>"; };
+		21000000000000000000000C /* CacheManaging.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CacheManaging.swift; sourceTree = "<group>"; };
+		21000000000000000000000D /* CacheManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CacheManager.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -158,6 +184,8 @@
 		700000000000000000000007 /* Models */ = {
 			isa = PBXGroup;
 			children = (
+				210000000000000000000006 /* CachedDownload.swift */,
+				210000000000000000000007 /* CacheState.swift */,
 				20000000000000000000000D /* Reciter.swift */,
 				20000000000000000000000E /* Surah.swift */,
 				20000000000000000000000F /* Track.swift */,
@@ -168,8 +196,14 @@
 		700000000000000000000008 /* Services */ = {
 			isa = PBXGroup;
 			children = (
+				21000000000000000000000C /* CacheManaging.swift */,
+				21000000000000000000000D /* CacheManager.swift */,
 				200000000000000000000010 /* CatalogRepository.swift */,
 				200000000000000000000011 /* GRDBCatalogRepository.swift */,
+				21000000000000000000000A /* DownloadClient.swift */,
+				210000000000000000000009 /* GRDBUserLibraryRepository.swift */,
+				21000000000000000000000B /* NetworkMonitoring.swift */,
+				210000000000000000000008 /* UserLibraryRepository.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -178,6 +212,7 @@
 		70000000000000000000000A /* Support */ = {
 			isa = PBXGroup;
 			children = (
+				210000000000000000000005 /* AppPaths.swift */,
 				20000000000000000000000B /* RootConfiguration.swift */,
 			);
 			path = Support;
@@ -186,8 +221,12 @@
 		70000000000000000000000B /* QrecsTests */ = {
 			isa = PBXGroup;
 			children = (
+				210000000000000000000001 /* AppPathsAndOfflinePolicyTests.swift */,
+				210000000000000000000004 /* CacheManagerTests.swift */,
 				20000000000000000000000C /* CatalogRepositoryTests.swift */,
+				210000000000000000000003 /* DownloadClientTests.swift */,
 				200000000000000000000006 /* RootConfigurationTests.swift */,
+				210000000000000000000002 /* UserLibraryRepositoryTests.swift */,
 			);
 			path = QrecsTests;
 			sourceTree = "<group>";
@@ -334,14 +373,23 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				110000000000000000000005 /* AppPaths.swift in Sources */,
+				110000000000000000000006 /* CachedDownload.swift in Sources */,
+				11000000000000000000000C /* CacheManaging.swift in Sources */,
+				11000000000000000000000D /* CacheManager.swift in Sources */,
+				110000000000000000000007 /* CacheState.swift in Sources */,
 				100000000000000000000001 /* QrecsApp.swift in Sources */,
 				10000000000000000000000D /* CatalogRepository.swift in Sources */,
+				11000000000000000000000A /* DownloadClient.swift in Sources */,
 				10000000000000000000000E /* GRDBCatalogRepository.swift in Sources */,
+				110000000000000000000009 /* GRDBUserLibraryRepository.swift in Sources */,
+				11000000000000000000000B /* NetworkMonitoring.swift in Sources */,
 				10000000000000000000000A /* Reciter.swift in Sources */,
 				100000000000000000000002 /* RootView.swift in Sources */,
 				100000000000000000000003 /* SettingsView.swift in Sources */,
 				10000000000000000000000B /* Surah.swift in Sources */,
 				10000000000000000000000C /* Track.swift in Sources */,
+				110000000000000000000008 /* UserLibraryRepository.swift in Sources */,
 				100000000000000000000008 /* RootConfiguration.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -350,8 +398,12 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				110000000000000000000001 /* AppPathsAndOfflinePolicyTests.swift in Sources */,
+				110000000000000000000004 /* CacheManagerTests.swift in Sources */,
 				100000000000000000000009 /* CatalogRepositoryTests.swift in Sources */,
+				110000000000000000000003 /* DownloadClientTests.swift in Sources */,
 				100000000000000000000005 /* RootConfigurationTests.swift in Sources */,
+				110000000000000000000002 /* UserLibraryRepositoryTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
