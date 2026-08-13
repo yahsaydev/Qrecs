@@ -89,6 +89,7 @@ final class AppContainer: ObservableObject {
     private func makeUITestStore() async throws -> LibraryStore {
         let arguments = ProcessInfo.processInfo.arguments
         let isOfflineEmpty = arguments.contains("--offline-empty")
+        let hasPlaybackFailure = arguments.contains("--playback-failure")
         let paths = try AppPaths(baseDirectory: FileManager.default.temporaryDirectory)
         let reciters = [
             Reciter(
@@ -125,7 +126,8 @@ final class AppContainer: ObservableObject {
         let cache = FixtureCache()
         let network = FixtureNetwork(available: true)
         let ambient = AmbientMixer(backend: UnavailableAmbientAudioBackend())
-        let player = QuranPlayer(audio: AVPlayerAudioBackend(), ambient: ambient)
+        let audio = FixtureQuranAudioBackend()
+        let player = QuranPlayer(audio: audio, ambient: ambient)
         if isOfflineEmpty { preferences.manualOffline = true }
         let store = LibraryStore(
             catalog: catalog,
@@ -138,7 +140,14 @@ final class AppContainer: ObservableObject {
             preferences: preferences
         )
         await store.start()
-        if !isOfflineEmpty { await store.selectReciter("fixture-reciter") }
+        if !isOfflineEmpty {
+            await store.selectReciter("fixture-reciter")
+            if hasPlaybackFailure, let track = tracks.first {
+                store.selectTrack(track)
+                player.play()
+                audio.failCurrent(message: "Fixture playback failure")
+            }
+        }
         return store
     }
     #endif
@@ -155,6 +164,30 @@ private final class UnavailableAmbientAudioBackend: AmbientAudioBackend {
 }
 
 #if DEBUG
+@MainActor
+private final class FixtureQuranAudioBackend: QuranAudioBackend {
+    private let stream: AsyncStream<QuranAudioEvent>
+    private let continuation: AsyncStream<QuranAudioEvent>.Continuation
+    private var currentItemID: QuranAudioItemID?
+
+    init() {
+        (stream, continuation) = AsyncStream.makeStream()
+    }
+
+    func load(url: URL, itemID: QuranAudioItemID) { currentItemID = itemID }
+    func play() {}
+    func pause() {}
+    func stop() {}
+    func seek(to seconds: TimeInterval) {}
+    func setVolume(_ volume: Float) {}
+    func events() -> AsyncStream<QuranAudioEvent> { stream }
+
+    func failCurrent(message: String) {
+        guard let currentItemID else { return }
+        continuation.yield(.failed(itemID: currentItemID, message: message))
+    }
+}
+
 private actor FixtureCatalog: CatalogRepository {
     let reciters: [Reciter]
     let surahs: [Surah]

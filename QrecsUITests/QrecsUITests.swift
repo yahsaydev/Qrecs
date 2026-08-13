@@ -50,6 +50,35 @@ final class QrecsUITests: XCTestCase {
     }
 
     @MainActor
+    func testPlaybackFailureShowsMessageAndRetry() {
+        let app = launch(language: "en", additionalArguments: ["--playback-failure"])
+        let failure = app.descendants(matching: .any)["player.failure"]
+        XCTAssertTrue(failure.waitForExistence(timeout: 5))
+        XCTAssertEqual(failure.label, "Fixture playback failure")
+        XCTAssertTrue(app.buttons["player.retry"].exists)
+    }
+
+    @MainActor
+    func testLightThemeOverrideIsReflectedInSettings() {
+        assertThemeOverride(argument: "light", expectedValue: "Light")
+    }
+
+    @MainActor
+    func testDarkThemeOverrideIsReflectedInSettings() {
+        assertThemeOverride(argument: "dark", expectedValue: "Dark")
+    }
+
+    @MainActor
+    private func assertThemeOverride(argument: String, expectedValue: String) {
+        let app = launch(language: "en", additionalArguments: ["--theme=\(argument)"])
+        XCTAssertTrue(app.splitGroups.firstMatch.waitForExistence(timeout: 5))
+        app.typeKey(",", modifierFlags: .command)
+        let themePicker = app.popUpButtons["settings.theme"]
+        XCTAssertTrue(themePicker.waitForExistence(timeout: 3))
+        XCTAssertEqual(themePicker.value as? String, expectedValue)
+    }
+
+    @MainActor
     private func launch(
         language: String,
         additionalArguments: [String] = []

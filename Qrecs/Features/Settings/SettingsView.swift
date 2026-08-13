@@ -39,6 +39,7 @@ private struct GeneralSettingsView: View {
                 Text(preferences.text("Light")).tag(AppTheme.light)
                 Text(preferences.text("Dark")).tag(AppTheme.dark)
             }
+            .accessibilityIdentifier("settings.theme")
 
             Toggle(preferences.text("Manual offline mode"), isOn: $preferences.manualOffline)
 

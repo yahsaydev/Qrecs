@@ -11,8 +11,7 @@ enum PlayerFailure: Equatable, Sendable {
 
     var isRetryable: Bool {
         switch self {
-        case .networkUnavailable: true
-        case .playback: false
+        case .networkUnavailable, .playback: true
         }
     }
 }

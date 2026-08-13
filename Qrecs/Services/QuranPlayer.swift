@@ -137,11 +137,12 @@ final class QuranPlayer: QuranPlaying {
     }
 
     func retry() {
-        guard case .failed(.networkUnavailable) = state.status,
-              isNetworkAvailable,
-              state.currentTrack != nil else { return }
+        guard case .failed = state.status,
+              state.currentTrack != nil,
+              state.source != .remote || isNetworkAvailable else { return }
         let resume = shouldResumeAfterRetry
         let position = retryPosition ?? state.elapsed
+        shouldResumeAfterRetry = false
         state.elapsed = position
         loadCurrent(playing: false, resetProgress: false)
         if position > 0 {
@@ -244,6 +245,8 @@ final class QuranPlayer: QuranPlaying {
             advance(automatic: true)
         case let .failed(_, message):
             shouldResumeAfterRetry = state.status == .playing
+            retryPosition = state.elapsed
+            currentAudioItemID = nil
             audio.stop()
             ambient.stop()
             state.status = .failed(.playback(message))

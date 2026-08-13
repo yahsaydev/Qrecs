@@ -42,7 +42,10 @@ final class LibraryStore: ObservableObject {
     private let ambient: any AmbientMixing
     private let paths: AppPaths
     private var observationTasks: [Task<Void, Never>] = []
-    private var cacheObservationTasks: [Task<Void, Never>] = []
+    private var cacheObservationTasks: [String: Task<Void, Never>] = [:]
+    private var cacheObserverReciterIDs: [String: String] = [:]
+    private var cacheOperationsStarting: Set<String> = []
+    private var knownTrackReciterIDs: [String: String] = [:]
     private var preferencesCancellable: AnyCancellable?
     private var manualOfflineCancellable: AnyCancellable?
 
@@ -77,7 +80,7 @@ final class LibraryStore: ObservableObject {
 
     deinit {
         observationTasks.forEach { $0.cancel() }
-        cacheObservationTasks.forEach { $0.cancel() }
+        cacheObservationTasks.values.forEach { $0.cancel() }
     }
 
     var effectiveOffline: Bool {
@@ -124,6 +127,16 @@ final class LibraryStore: ObservableObject {
         reciters.first { $0.id == selectedReciterID }
     }
 
+    var playbackFailureMessage: String? {
+        guard case let .failed(failure) = playerState.status else { return nil }
+        switch failure {
+        case .networkUnavailable:
+            return preferences.text("Network unavailable")
+        case let .playback(message):
+            return message.isEmpty ? preferences.text("Playback failed") : message
+        }
+    }
+
     func start() async {
         guard phase != .loading else { return }
         phase = .loading
@@ -157,8 +170,6 @@ final class LibraryStore: ObservableObject {
     }
 
     func selectReciter(_ id: String?) async {
-        cacheObservationTasks.forEach { $0.cancel() }
-        cacheObservationTasks.removeAll()
         tracks = []
         selectedTrackID = nil
         selectedReciterID = id
@@ -169,21 +180,15 @@ final class LibraryStore: ObservableObject {
             tracks = loadedTracks
             let snapshot = await cache.snapshot()
             for track in loadedTracks {
+                knownTrackReciterIDs[track.id] = track.reciterID
                 if let state = snapshot.states[track.id] {
                     cacheStates[track.id] = state
+                    if state.isInFlight {
+                        await observeCacheIfNeeded(for: track)
+                    }
                 } else if let download = downloadsByTrack[track.id] {
                     cacheStates[track.id] = .cached(download)
                 }
-                let stream = await cache.events(for: track.id)
-                cacheObservationTasks.append(Task { @MainActor [weak self] in
-                    for await state in stream {
-                        guard !Task.isCancelled else { return }
-                        if case .cached = state {
-                            try? await self?.refreshCacheSummary()
-                        }
-                        self?.receiveCacheState(state, trackID: track.id)
-                    }
-                })
             }
         } catch {
             nonfatalError = error.localizedDescription
@@ -215,9 +220,16 @@ final class LibraryStore: ObservableObject {
     }
 
     func cacheTrack(_ track: Track) async {
+        knownTrackReciterIDs[track.id] = track.reciterID
+        cacheOperationsStarting.insert(track.id)
+        await observeCacheIfNeeded(for: track)
         do {
             try await cache.cache(track: track)
+            cacheOperationsStarting.remove(track.id)
+            await synchronizeCacheState(trackID: track.id)
         } catch {
+            cacheOperationsStarting.remove(track.id)
+            cancelCacheObservation(trackID: track.id)
             nonfatalError = error.localizedDescription
         }
     }
@@ -230,12 +242,20 @@ final class LibraryStore: ObservableObject {
 
     func cancelCache(trackID: String) async {
         await cache.cancel(trackID: trackID)
+        await synchronizeCacheState(trackID: trackID)
     }
 
     func retryCache(trackID: String) async {
+        guard let track = tracks.first(where: { $0.id == trackID }) else { return }
+        cacheOperationsStarting.insert(trackID)
+        await observeCacheIfNeeded(for: track)
         do {
             try await cache.retry(trackID: trackID)
+            cacheOperationsStarting.remove(trackID)
+            await synchronizeCacheState(trackID: trackID)
         } catch {
+            cacheOperationsStarting.remove(trackID)
+            cancelCacheObservation(trackID: trackID)
             nonfatalError = error.localizedDescription
         }
     }
@@ -243,6 +263,7 @@ final class LibraryStore: ObservableObject {
     func removeCachedTrack(trackID: String) async {
         do {
             try await cache.remove(trackID: trackID)
+            cancelCacheObservation(trackID: trackID)
             cacheStates.removeValue(forKey: trackID)
             try await refreshCacheSummary()
         } catch {
@@ -251,9 +272,21 @@ final class LibraryStore: ObservableObject {
     }
 
     func removeCachedReciter(_ reciterID: String) async {
+        let observedTrackIDs = cacheObserverReciterIDs.compactMap { trackID, observedReciterID in
+            observedReciterID == reciterID ? trackID : nil
+        }
+        let persistedTrackIDs = downloadsByTrack.values
+            .filter { $0.reciterID == reciterID }
+            .map(\.trackID)
+        let knownTrackIDs = knownTrackReciterIDs.compactMap { trackID, knownReciterID in
+            knownReciterID == reciterID ? trackID : nil
+        }
+        let removedTrackIDs = Set(observedTrackIDs + persistedTrackIDs + knownTrackIDs)
         do {
             try await cache.removeAll(reciterID: reciterID)
-            cacheStates = cacheStates.filter { downloadsByTrack[$0.key]?.reciterID != reciterID }
+            observedTrackIDs.forEach(cancelCacheObservation)
+            cacheStates = cacheStates.filter { !removedTrackIDs.contains($0.key) }
+            knownTrackReciterIDs = knownTrackReciterIDs.filter { $0.value != reciterID }
             try await refreshCacheSummary()
         } catch {
             nonfatalError = error.localizedDescription
@@ -263,6 +296,7 @@ final class LibraryStore: ObservableObject {
     func clearCache() async {
         do {
             try await cache.clearAll()
+            Array(cacheObservationTasks.keys).forEach(cancelCacheObservation)
             cacheStates.removeAll()
             try await refreshCacheSummary()
         } catch {
@@ -349,8 +383,61 @@ final class LibraryStore: ObservableObject {
         ]
     }
 
-    private func receiveCacheState(_ state: CacheDownloadState, trackID: String) {
+    private func observeCacheIfNeeded(for track: Track) async {
+        guard cacheObservationTasks[track.id] == nil else { return }
+        knownTrackReciterIDs[track.id] = track.reciterID
+        let stream = await cache.events(for: track.id)
+        cacheObserverReciterIDs[track.id] = track.reciterID
+        cacheObservationTasks[track.id] = Task { @MainActor [weak self] in
+            for await state in stream {
+                guard !Task.isCancelled else { return }
+                if await self?.receiveCacheState(state, trackID: track.id) == true {
+                    self?.finishCacheObservation(trackID: track.id, cancelTask: false)
+                    return
+                }
+            }
+        }
+    }
+
+    private func synchronizeCacheState(trackID: String) async {
+        guard let state = await cache.state(trackID: trackID) else { return }
+        if await receiveCacheState(state, trackID: trackID) {
+            finishCacheObservation(trackID: trackID, cancelTask: true)
+        }
+    }
+
+    private func receiveCacheState(_ state: CacheDownloadState, trackID: String) async -> Bool {
+        if state.isTerminal, cacheOperationsStarting.contains(trackID) {
+            cacheStates[trackID] = state
+            return false
+        }
+        if state.isTerminal,
+           let currentState = await cache.state(trackID: trackID),
+           currentState != state {
+            return await receiveCacheState(currentState, trackID: trackID)
+        }
+        if case .cached = state {
+            do {
+                try await refreshCacheSummary()
+            } catch {
+                nonfatalError = error.localizedDescription
+            }
+        }
         cacheStates[trackID] = state
+        return state.isTerminal
+    }
+
+    private func finishCacheObservation(trackID: String, cancelTask: Bool) {
+        let task = cacheObservationTasks.removeValue(forKey: trackID)
+        if cancelTask { task?.cancel() }
+        cacheObserverReciterIDs.removeValue(forKey: trackID)
+        cacheOperationsStarting.remove(trackID)
+    }
+
+    private func cancelCacheObservation(trackID: String) {
+        cacheObservationTasks.removeValue(forKey: trackID)?.cancel()
+        cacheObserverReciterIDs.removeValue(forKey: trackID)
+        cacheOperationsStarting.remove(trackID)
     }
 
     private func refreshCacheSummary() async throws {
@@ -380,4 +467,15 @@ final class LibraryStore: ObservableObject {
             )
         })
     }
+}
+
+private extension CacheDownloadState {
+    var isInFlight: Bool {
+        switch self {
+        case .queued, .downloading: true
+        case .cached, .failed, .cancelled: false
+        }
+    }
+
+    var isTerminal: Bool { !isInFlight }
 }

@@ -78,10 +78,14 @@ final class AVPlayerAudioBackend: QuranAudioBackend {
                 let error = item.error
                 self.publish(.failed(
                     itemID: itemID,
-                    message: error?.localizedDescription ?? "Playback failed."
+                    message: Self.failureMessage(for: error)
                 ))
             }
         }
+    }
+
+    static func failureMessage(for error: Error?) -> String {
+        error?.localizedDescription ?? ""
     }
 
     func play() { player.play() }

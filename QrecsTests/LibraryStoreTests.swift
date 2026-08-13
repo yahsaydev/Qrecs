@@ -65,6 +65,7 @@ final class LibraryStoreTests: XCTestCase {
         await fixture.store.start()
         await fixture.store.selectReciter("r1")
         let track = fixture.store.tracks[1]
+        await fixture.store.cacheTrack(track)
         let cached = CachedDownload(
             trackID: track.id,
             reciterID: track.reciterID,
@@ -84,6 +85,113 @@ final class LibraryStoreTests: XCTestCase {
         await fulfillment(of: [observed], timeout: 1)
 
         XCTAssertEqual(fixture.store.cacheStates[track.id], .cached(cached))
+        withExtendedLifetime(cancellable) {}
+    }
+
+    func testCacheCompletionRefreshesSummaryAfterSwitchingReciters() async throws {
+        let fixture = makeFixture(networkAvailable: true)
+        await fixture.store.start()
+        await fixture.store.selectReciter("r1")
+        let track = fixture.store.tracks[1]
+        await fixture.store.cacheTrack(track)
+
+        await fixture.store.selectReciter("r2")
+        let cached = CachedDownload(
+            trackID: track.id,
+            reciterID: track.reciterID,
+            relativePath: "two.mp3",
+            byteCount: 50,
+            etag: nil,
+            updatedAt: Date(timeIntervalSince1970: 2)
+        )
+        await fixture.user.upsertDownload(cached)
+        let refreshed = expectation(description: "background cache completion refreshes summary")
+        let cancellable = fixture.store.$totalCachedBytes
+            .dropFirst()
+            .sink { bytes in
+                if bytes == 92 { refreshed.fulfill() }
+            }
+
+        await fixture.cache.send(.cached(cached), trackID: track.id)
+        await fulfillment(of: [refreshed], timeout: 1)
+
+        XCTAssertEqual(fixture.store.cachedCounts, ["r1": 2])
+        XCTAssertEqual(fixture.store.cacheGroups, [
+            CachedDownloadGroup(reciterID: "r1", trackCount: 2, byteCount: 92),
+        ])
+        XCTAssertEqual(fixture.store.downloadsByTrack[track.id], cached)
+        withExtendedLifetime(cancellable) {}
+    }
+
+    func testSelectingReciterDoesNotCreateIdleCacheObservers() async {
+        let fixture = makeFixture(networkAvailable: true)
+        await fixture.store.start()
+
+        await fixture.store.selectReciter("r1")
+
+        let requestCount = await fixture.cache.eventRequestCount()
+        XCTAssertEqual(requestCount, 0)
+    }
+
+    func testTerminalCacheObserverFinishesBeforeRetryObserverStarts() async {
+        let fixture = makeFixture(networkAvailable: true)
+        await fixture.store.start()
+        await fixture.store.selectReciter("r1")
+        let track = fixture.store.tracks[1]
+        await fixture.store.cacheTrack(track)
+        let failed = expectation(description: "first observer publishes terminal failure")
+        let failureCancellable = fixture.store.$cacheStates
+            .dropFirst()
+            .filter { $0[track.id] == .failed(message: "temporary") }
+            .prefix(1)
+            .sink { _ in failed.fulfill() }
+        await fixture.cache.send(.failed(message: "temporary"), trackID: track.id)
+        await fulfillment(of: [failed], timeout: 1)
+
+        await fixture.store.retryCache(trackID: track.id)
+        let requestCount = await fixture.cache.eventRequestCount()
+        XCTAssertEqual(requestCount, 2)
+        let cached = CachedDownload(
+            trackID: track.id,
+            reciterID: track.reciterID,
+            relativePath: "two.mp3",
+            byteCount: 50,
+            etag: nil,
+            updatedAt: Date(timeIntervalSince1970: 2)
+        )
+        await fixture.user.upsertDownload(cached)
+        let refreshed = expectation(description: "retry observer refreshes summary once")
+        let summaryCancellable = fixture.store.$totalCachedBytes.dropFirst().prefix(1).sink { bytes in
+            if bytes == 92 { refreshed.fulfill() }
+        }
+
+        await fixture.cache.send(.cached(cached), trackID: track.id)
+        await fulfillment(of: [refreshed], timeout: 1)
+
+        let groupsInvocationCount = await fixture.user.downloadGroupsInvocationCount()
+        XCTAssertEqual(groupsInvocationCount, 2)
+        withExtendedLifetime((failureCancellable, summaryCancellable)) {}
+    }
+
+    func testRemovingReciterPurgesTerminalFailedTrackState() async {
+        let fixture = makeFixture(networkAvailable: true)
+        await fixture.store.start()
+        await fixture.store.selectReciter("r1")
+        let track = fixture.store.tracks[1]
+        await fixture.store.cacheTrack(track)
+        let failed = expectation(description: "track reaches terminal failure")
+        let cancellable = fixture.store.$cacheStates
+            .dropFirst()
+            .filter { $0[track.id] == .failed(message: "temporary") }
+            .prefix(1)
+            .sink { _ in failed.fulfill() }
+        await fixture.cache.send(.failed(message: "temporary"), trackID: track.id)
+        await fulfillment(of: [failed], timeout: 1)
+
+        await fixture.store.selectReciter("r2")
+        await fixture.store.removeCachedReciter("r1")
+
+        XCTAssertNil(fixture.store.cacheStates[track.id])
         withExtendedLifetime(cancellable) {}
     }
 
@@ -109,6 +217,29 @@ final class LibraryStoreTests: XCTestCase {
         fixture.store.preferences.manualOffline = true
 
         XCTAssertEqual(fixture.player.networkAvailability.last, false)
+    }
+
+    func testPlaybackFailureExposesMessageAndRetryThroughStore() async {
+        let fixture = makeFixture(networkAvailable: true)
+        defer { fixture.player.finishUpdates() }
+        await fixture.store.start()
+        await fixture.store.selectReciter("r1")
+        fixture.store.selectTrack(fixture.store.tracks[0])
+        var failedState = fixture.player.state
+        failedState.status = .failed(.playback("decoder failed"))
+        let observed = expectation(description: "store observes playback failure")
+        let cancellable = fixture.store.$playerState.dropFirst().prefix(1).sink { state in
+            if state.status == failedState.status { observed.fulfill() }
+        }
+
+        fixture.player.send(failedState)
+        await fulfillment(of: [observed], timeout: 1)
+
+        XCTAssertEqual(fixture.store.playbackFailureMessage, "decoder failed")
+        XCTAssertTrue(fixture.store.playerState.canRetry)
+        fixture.store.retryPlayback()
+        XCTAssertEqual(fixture.player.retryCount, 1)
+        withExtendedLifetime(cancellable) {}
     }
 
     func testContainerForwardsReadyStoreChanges() async {
@@ -172,7 +303,7 @@ final class LibraryStoreTests: XCTestCase {
             preferences: preferences
         )
         return StoreFixture(
-            store: store, cache: cache, network: network,
+            store: store, user: user, cache: cache, network: network,
             player: player, paths: paths
         )
     }
@@ -181,6 +312,7 @@ final class LibraryStoreTests: XCTestCase {
 @MainActor
 private struct StoreFixture {
     let store: LibraryStore
+    let user: StoreUserLibrary
     let cache: StoreCache
     let network: StoreNetwork
     let player: StorePlayer
@@ -206,6 +338,7 @@ private actor StoreCatalog: CatalogRepository {
 private actor StoreUserLibrary: UserLibraryRepository {
     var favoriteIDs: Set<String>
     var storedDownloads: [CachedDownload]
+    var downloadGroupsCalls = 0
 
     init(favorites: Set<String>, downloads: [CachedDownload]) {
         favoriteIDs = favorites
@@ -237,7 +370,8 @@ private actor StoreUserLibrary: UserLibraryRepository {
     func cachedReciterIDs() -> Set<String> { Set(storedDownloads.map(\.reciterID)) }
     func totalDownloadedBytes() -> Int64 { storedDownloads.reduce(0) { $0 + $1.byteCount } }
     func downloadGroups() -> [CachedDownloadGroup] {
-        Dictionary(grouping: storedDownloads, by: \.reciterID).map { id, values in
+        downloadGroupsCalls += 1
+        return Dictionary(grouping: storedDownloads, by: \.reciterID).map { id, values in
             CachedDownloadGroup(
                 reciterID: id,
                 trackCount: values.count,
@@ -245,16 +379,24 @@ private actor StoreUserLibrary: UserLibraryRepository {
             )
         }.sorted { $0.reciterID < $1.reciterID }
     }
+    func downloadGroupsInvocationCount() -> Int { downloadGroupsCalls }
 }
 
 private actor StoreCache: CacheManaging {
     var states: [String: CacheDownloadState]
     var continuations: [String: [AsyncStream<CacheDownloadState>.Continuation]] = [:]
+    var eventRequests = 0
 
     init(states: [String: CacheDownloadState]) { self.states = states }
-    func cache(track: Track) {}
+    func cache(track: Track) {
+        states[track.id] = .queued
+        continuations[track.id, default: []].forEach { $0.yield(.queued) }
+    }
     func cancel(trackID: String) {}
-    func retry(trackID: String) {}
+    func retry(trackID: String) {
+        states[trackID] = .queued
+        continuations[trackID, default: []].forEach { $0.yield(.queued) }
+    }
     func remove(trackID: String) { states.removeValue(forKey: trackID) }
     func removeAll(reciterID: String) {}
     func clearAll() { states.removeAll() }
@@ -262,6 +404,7 @@ private actor StoreCache: CacheManaging {
     func state(trackID: String) -> CacheDownloadState? { states[trackID] }
     func snapshot() -> CacheSnapshot { CacheSnapshot(states: states) }
     func events(for trackID: String) -> AsyncStream<CacheDownloadState> {
+        eventRequests += 1
         let (stream, continuation) = AsyncStream.makeStream(of: CacheDownloadState.self)
         continuations[trackID, default: []].append(continuation)
         if let state = states[trackID] { continuation.yield(state) }
@@ -271,6 +414,7 @@ private actor StoreCache: CacheManaging {
         states[trackID] = state
         continuations[trackID, default: []].forEach { $0.yield(state) }
     }
+    func eventRequestCount() -> Int { eventRequests }
 }
 
 private actor StoreNetwork: NetworkMonitoring {
@@ -295,13 +439,18 @@ private actor StoreNetwork: NetworkMonitoring {
 @MainActor
 private final class StorePlayer: QuranPlaying {
     var state = PlayerState.idle
+    var continuation: AsyncStream<PlayerState>.Continuation?
     var selectedTrack: Track?
     var selectedQueue: [Track] = []
     var selectedLocalURLs: [String: URL] = [:]
     var playCount = 0
     var networkAvailability: [Bool] = []
+    var retryCount = 0
     func updates() -> AsyncStream<PlayerState> {
-        AsyncStream { $0.yield(state) }
+        AsyncStream {
+            continuation = $0
+            $0.yield(state)
+        }
     }
     func select(track: Track, queue: [Track], localURLs: [String: URL]) {
         selectedTrack = track
@@ -319,7 +468,15 @@ private final class StorePlayer: QuranPlaying {
     func setVolume(_ volume: Float) { state.volume = volume }
     func handleNetworkAvailability(_ available: Bool) { networkAvailability.append(available) }
     func observeNetwork(using monitor: any NetworkMonitoring) {}
-    func retry() {}
+    func retry() { retryCount += 1 }
+    func send(_ state: PlayerState) {
+        self.state = state
+        continuation?.yield(state)
+    }
+    func finishUpdates() {
+        continuation?.finish()
+        continuation = nil
+    }
 }
 
 @MainActor

@@ -29,6 +29,13 @@ struct MiniPlayerView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
+                if let failureMessage = store.playbackFailureMessage {
+                    Label(failureMessage, systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                        .lineLimit(1)
+                        .accessibilityIdentifier("player.failure")
+                }
             }
             .frame(width: 180, alignment: .leading)
 

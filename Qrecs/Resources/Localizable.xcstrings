@@ -39,6 +39,7 @@
     "Online" : { "localizations" : { "ru" : { "stringUnit" : { "state" : "translated", "value" : "Онлайн" } } } },
     "Pause" : { "localizations" : { "ru" : { "stringUnit" : { "state" : "translated", "value" : "Пауза" } } } },
     "Playback" : { "localizations" : { "ru" : { "stringUnit" : { "state" : "translated", "value" : "Воспроизведение" } } } },
+    "Playback failed" : { "localizations" : { "ru" : { "stringUnit" : { "state" : "translated", "value" : "Ошибка воспроизведения" } } } },
     "Play" : { "localizations" : { "ru" : { "stringUnit" : { "state" : "translated", "value" : "Воспроизвести" } } } },
     "Previous" : { "localizations" : { "ru" : { "stringUnit" : { "state" : "translated", "value" : "Предыдущая" } } } },
     "Quran recordings" : { "localizations" : { "ru" : { "stringUnit" : { "state" : "translated", "value" : "Записи Корана" } } } },

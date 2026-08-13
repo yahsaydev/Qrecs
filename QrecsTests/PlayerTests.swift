@@ -4,6 +4,10 @@ import XCTest
 
 @MainActor
 final class PlayerTests: XCTestCase {
+    func testAVPlayerMissingErrorDefersToLocalizedStoreFallback() {
+        XCTAssertEqual(AVPlayerAudioBackend.failureMessage(for: nil), "")
+    }
+
     func testSelectionDoesNotAutoplayAndQueueAdvancesInCanonicalSurahOrder() async {
         let backend = FakeQuranAudioBackend()
         let ambient = FakeAmbientMixer()
@@ -218,6 +222,60 @@ final class PlayerTests: XCTestCase {
 
         XCTAssertEqual(player.state.status, .failed(.networkUnavailable))
         XCTAssertTrue(player.state.canRetry)
+    }
+
+    func testPlaybackFailureWhilePlayingRetriesFromCapturedPosition() async {
+        let backend = FakeQuranAudioBackend()
+        let ambient = FakeAmbientMixer()
+        let player = QuranPlayer(audio: backend, ambient: ambient)
+        let track = makeTrack(7)
+        player.select(track: track, queue: [track], localURLs: [:])
+        player.play()
+        _ = await stateAfterEvent(
+            backend.progressEvent(elapsed: 23, duration: 120),
+            backend: backend,
+            player: player
+        ) { $0.elapsed == 23 }
+
+        await backend.sendAndWaitUntilConsumed(backend.failedEvent(message: "decoder failed"))
+
+        XCTAssertEqual(player.state.status, .failed(.playback("decoder failed")))
+        XCTAssertTrue(player.state.canRetry)
+        XCTAssertEqual(backend.stopCount, 1)
+        XCTAssertEqual(ambient.stopCount, 1)
+
+        player.retry()
+
+        XCTAssertEqual(player.state.status, .playing)
+        XCTAssertEqual(backend.loadedURLs, [track.url, track.url])
+        XCTAssertEqual(backend.seeks, [23])
+        XCTAssertEqual(backend.playCount, 2)
+        XCTAssertEqual(ambient.playCount, 2)
+    }
+
+    func testPausedLocalPlaybackFailureRetriesWithoutAutoplay() async {
+        let backend = FakeQuranAudioBackend()
+        let ambient = FakeAmbientMixer()
+        let player = QuranPlayer(audio: backend, ambient: ambient)
+        let track = makeTrack(8)
+        let localURL = URL(fileURLWithPath: "/tmp/local-008.mp3")
+        player.select(track: track, queue: [track], localURLs: [track.id: localURL])
+        _ = await stateAfterEvent(
+            backend.progressEvent(elapsed: 17, duration: 90),
+            backend: backend,
+            player: player
+        ) { $0.elapsed == 17 }
+
+        await backend.sendAndWaitUntilConsumed(backend.failedEvent(message: "file unreadable"))
+        XCTAssertTrue(player.state.canRetry)
+
+        player.retry()
+
+        XCTAssertEqual(player.state.status, .paused)
+        XCTAssertEqual(backend.loadedURLs, [localURL, localURL])
+        XCTAssertEqual(backend.seeks, [17])
+        XCTAssertEqual(backend.playCount, 0)
+        XCTAssertEqual(ambient.playCount, 0)
     }
 
     func testOfflineTransitionThenPlaybackFailureKeepsNetworkFailure() async {
