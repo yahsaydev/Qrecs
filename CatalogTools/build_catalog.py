@@ -321,6 +321,7 @@ def _write_database(
         suffix=".tmp",
         dir=output_path.parent,
     )
+    os.fchmod(temporary_fd, 0o644)
     os.close(temporary_fd)
     temporary_path = Path(temporary_name)
     try:

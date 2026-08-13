@@ -106,6 +106,10 @@ class CatalogBuilderTests(unittest.TestCase):
             hashlib.sha256(second.read_bytes()).digest(),
         )
 
+    def test_build_output_is_world_readable(self):
+        database = self.build()
+        self.assertEqual(database.stat().st_mode & 0o777, 0o644)
+
     def test_parallel_builds_share_output_safely(self):
         output = self.temp / "catalog.sqlite"
 
