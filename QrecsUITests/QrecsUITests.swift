@@ -22,13 +22,47 @@ final class QrecsUITests: XCTestCase {
     }
 
     @MainActor
-    func testSelectingTrackRevealsPlayerAndSoundsPopover() {
+    func testSingleClickOnlySelectsAndDoubleClickRevealsPlayer() {
         let app = launch(language: "en")
         XCTAssertTrue(app.outlines["tracks.table"].waitForExistence(timeout: 5))
-        app.outlines["tracks.table"].children(matching: .tableRow).element(boundBy: 0).click()
+        let row = app.outlines["tracks.table"].children(matching: .tableRow).element(boundBy: 0)
+        row.click()
+        XCTAssertFalse(app.buttons["player.playPause"].waitForExistence(timeout: 0.5))
+        row.doubleClick()
         XCTAssertTrue(app.buttons["player.playPause"].waitForExistence(timeout: 2))
+        let playerSurface = app.otherElements["player.surface"]
+        XCTAssertTrue(playerSurface.waitForExistence(timeout: 2))
+        XCTAssertLessThanOrEqual(playerSurface.frame.height, 76.5)
         app.buttons["player.sounds"].click()
         XCTAssertTrue(app.checkBoxes["sound.fire.enabled"].waitForExistence(timeout: 2))
+    }
+
+    @MainActor
+    func testReturnPlaysCurrentTableSelection() {
+        let app = launch(language: "en")
+        let table = app.outlines["tracks.table"]
+        XCTAssertTrue(table.waitForExistence(timeout: 5))
+        table.children(matching: .tableRow).element(boundBy: 0).click()
+        XCTAssertFalse(app.buttons["player.playPause"].waitForExistence(timeout: 0.5))
+
+        table.typeKey(.return, modifierFlags: [])
+
+        XCTAssertTrue(app.buttons["player.playPause"].waitForExistence(timeout: 2))
+    }
+
+    @MainActor
+    func testContextMenuPlayUsesClickedTableSelection() {
+        let app = launch(language: "en")
+        let table = app.outlines["tracks.table"]
+        XCTAssertTrue(table.waitForExistence(timeout: 5))
+        let row = table.children(matching: .tableRow).element(boundBy: 1)
+
+        row.rightClick()
+        let playItem = app.menuItems["Play"]
+        XCTAssertTrue(playItem.waitForExistence(timeout: 2))
+        playItem.click()
+
+        XCTAssertTrue(app.buttons["player.playPause"].waitForExistence(timeout: 2))
     }
 
     @MainActor

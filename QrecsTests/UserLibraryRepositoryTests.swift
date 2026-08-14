@@ -111,6 +111,47 @@ final class UserLibraryRepositoryTests: XCTestCase {
         let remainingIDs = try await repository.downloads().map(\.trackID)
         XCTAssertNil(removedDownload)
         XCTAssertEqual(remainingIDs, ["track-1", "track-3"])
+
+        try await repository.removeDownloads(trackIDs: ["track-1", "track-3"])
+        let downloadsAfterBatchRemoval = try await repository.downloads()
+        XCTAssertTrue(downloadsAfterBatchRemoval.isEmpty)
+    }
+
+    func testBatchDownloadRemovalRollsBackEveryRowWhenOneDeleteFails() async throws {
+        let fixture = try UserLibraryFixture()
+        defer { fixture.remove() }
+        let repository = try GRDBUserLibraryRepository(databaseURL: fixture.databaseURL)
+        for trackID in ["first", "blocked"] {
+            try await repository.upsertDownload(CachedDownload(
+                trackID: trackID,
+                reciterID: "r1",
+                relativePath: "\(trackID).mp3",
+                byteCount: 1,
+                etag: nil,
+                updatedAt: .now
+            ))
+        }
+        let queue = try DatabaseQueue(path: fixture.databaseURL.path)
+        try await queue.write { database in
+            try database.execute(sql: """
+                CREATE TRIGGER reject_blocked_download
+                BEFORE DELETE ON downloads
+                WHEN OLD.track_id = 'blocked'
+                BEGIN
+                    SELECT RAISE(ABORT, 'blocked for transaction test');
+                END
+                """)
+        }
+
+        do {
+            try await repository.removeDownloads(trackIDs: ["first", "blocked"])
+            XCTFail("Expected the trigger to abort the batch")
+        } catch {
+            // The transaction must restore any row deleted before the trigger fired.
+        }
+
+        let remainingTrackIDs = try await repository.cachedTrackIDs()
+        XCTAssertEqual(remainingTrackIDs, ["first", "blocked"])
     }
 }
 

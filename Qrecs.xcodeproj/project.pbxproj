@@ -51,6 +51,7 @@
 		120000000000000000000203 /* rain.mp3 in Resources */ = {isa = PBXBuildFile; fileRef = 220000000000000000000203 /* rain.mp3 */; };
 		120000000000000000000204 /* waterfall.mp3 in Resources */ = {isa = PBXBuildFile; fileRef = 220000000000000000000204 /* waterfall.mp3 */; };
 		120000000000000000000205 /* THIRD_PARTY_NOTICES in Resources */ = {isa = PBXBuildFile; fileRef = 220000000000000000000205 /* THIRD_PARTY_NOTICES */; };
+		120000000000000000000206 /* night.wav in Resources */ = {isa = PBXBuildFile; fileRef = 220000000000000000000206 /* night.wav */; };
 		130000000000000000000001 /* LibraryPresentationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 230000000000000000000001 /* LibraryPresentationTests.swift */; };
 		130000000000000000000002 /* AppSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 230000000000000000000002 /* AppSettings.swift */; };
 		130000000000000000000003 /* LibraryProjection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 230000000000000000000003 /* LibraryProjection.swift */; };
@@ -136,6 +137,7 @@
 		220000000000000000000203 /* rain.mp3 */ = {isa = PBXFileReference; lastKnownFileType = audio.mp3; path = rain.mp3; sourceTree = "<group>"; };
 		220000000000000000000204 /* waterfall.mp3 */ = {isa = PBXFileReference; lastKnownFileType = audio.mp3; path = waterfall.mp3; sourceTree = "<group>"; };
 		220000000000000000000205 /* THIRD_PARTY_NOTICES */ = {isa = PBXFileReference; lastKnownFileType = text; path = THIRD_PARTY_NOTICES; sourceTree = "<group>"; };
+		220000000000000000000206 /* night.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = night.wav; sourceTree = "<group>"; };
 		230000000000000000000001 /* LibraryPresentationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryPresentationTests.swift; sourceTree = "<group>"; };
 		230000000000000000000002 /* AppSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppSettings.swift; sourceTree = "<group>"; };
 		230000000000000000000003 /* LibraryProjection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryProjection.swift; sourceTree = "<group>"; };
@@ -391,6 +393,7 @@
 			children = (
 				220000000000000000000202 /* birds.mp3 */,
 				220000000000000000000201 /* fire.mp3 */,
+				220000000000000000000206 /* night.wav */,
 				220000000000000000000203 /* rain.mp3 */,
 				220000000000000000000204 /* waterfall.mp3 */,
 			);
@@ -505,6 +508,7 @@
 				120000000000000000000202 /* birds.mp3 in Resources */,
 				10000000000000000000000F /* catalog.sqlite in Resources */,
 				120000000000000000000201 /* fire.mp3 in Resources */,
+				120000000000000000000206 /* night.wav in Resources */,
 				120000000000000000000203 /* rain.mp3 in Resources */,
 				120000000000000000000205 /* THIRD_PARTY_NOTICES in Resources */,
 				120000000000000000000204 /* waterfall.mp3 in Resources */,

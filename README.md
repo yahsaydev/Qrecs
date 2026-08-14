@@ -78,11 +78,15 @@ sqlite3 Qrecs/Resources/Catalog/catalog.sqlite \
   'select key, value from catalog_meta where key in ("reciter_count", "surah_count", "track_count") order by key;'
 ```
 
-Rebuild from checked-in CSV data, optionally merging an audited and confirmed snapshot at build time:
+Rebuild from checked-in CSV data, optionally merging a fully audited snapshot and complete legacy-audio audit at build time. See the [catalog pipeline guide](CatalogTools/README.md) for crawling and audit commands:
 
 ```sh
 python3 CatalogTools/build_catalog.py
-python3 CatalogTools/build_catalog.py --snapshot /path/to/confirmed-surahquran-snapshot.json
+python3 CatalogTools/build_catalog.py \
+  --snapshot /path/to/confirmed-surahquran-snapshot.json \
+  --snapshot-aliases CatalogTools/Data/surahquran_aliases.json \
+  --snapshot-localizations CatalogTools/Data/surahquran_localizations.json \
+  --legacy-audit /path/to/legacy-audit.json
 ```
 
 Because Qrecs is sandboxed, mutable data is stored under `~/Library/Containers/com.heezya.Qrecs/Data/Library/Application Support/Qrecs/`:

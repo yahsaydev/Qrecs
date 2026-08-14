@@ -205,6 +205,21 @@ final class PlayerTests: XCTestCase {
         XCTAssertEqual(player.state.status, .paused)
     }
 
+    func testPreviousAndNextSkipMissingSurahNumbersInSparseQueue() {
+        let backend = FakeQuranAudioBackend()
+        let ambient = FakeAmbientMixer()
+        let player = QuranPlayer(audio: backend, ambient: ambient)
+        let tracks = [makeTrack(79), makeTrack(2), makeTrack(12)]
+
+        player.select(track: makeTrack(2), queue: tracks, localURLs: [:])
+        player.next()
+        XCTAssertEqual(player.state.currentTrack?.surahNumber, 12)
+        player.next()
+        XCTAssertEqual(player.state.currentTrack?.surahNumber, 79)
+        player.previous()
+        XCTAssertEqual(player.state.currentTrack?.surahNumber, 12)
+    }
+
     func testOfflineAvailabilityUpdateSkipsUncachedRemoteTrack() {
         let backend = FakeQuranAudioBackend()
         let ambient = FakeAmbientMixer()

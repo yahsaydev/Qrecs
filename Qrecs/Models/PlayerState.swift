@@ -44,6 +44,14 @@ struct PlayerState: Equatable, Sendable {
         return min(max(elapsed / duration, 0), 1)
     }
 
+    func isPlayingTrack(_ trackID: String) -> Bool {
+        currentTrack?.id == trackID && status == .playing
+    }
+
+    func isPausedTrack(_ trackID: String) -> Bool {
+        currentTrack?.id == trackID && status == .paused
+    }
+
     static let idle = PlayerState(
         status: .idle,
         currentTrack: nil,

@@ -4,8 +4,8 @@ Qrecs third-party notices
 Ambient sound recordings
 ------------------------
 
-The following high-quality MP3 previews are distributed under Creative
-Commons CC0 1.0 Universal:
+The following recordings are distributed under Creative Commons CC0 1.0
+Universal:
 
 * Fire, by Nox_Sound
   https://freesound.org/people/Nox_Sound/sounds/558967/
@@ -15,6 +15,12 @@ Commons CC0 1.0 Universal:
   https://freesound.org/people/_lynks/sounds/595717/
 * Waterfall, by Nox_Sound
   https://freesound.org/people/Nox_Sound/sounds/637082/
+* Night, by Solar01
+  https://freesound.org/people/Solar01/sounds/662882/
+
+The Night recording is a 16-bit, 44.1 kHz WAV conversion of the original
+24-bit, 48 kHz WAV downloaded from the item page above. Its head and tail are
+joined with a one-second equal-power crossfade for seamless looping.
 
 CC0 1.0 Universal legal code and summary:
 https://creativecommons.org/publicdomain/zero/1.0/

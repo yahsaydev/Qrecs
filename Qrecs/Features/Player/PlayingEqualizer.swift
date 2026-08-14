@@ -4,7 +4,7 @@ struct PlayingEqualizer: View {
     let isPlaying: Bool
     let reduceMotion: Bool
 
-    @State private var motion = PlaybackMotionModel(staticPhase: 0.7)
+    @State private var motion = AuroraPhaseController(staticPhase: 0.7)
 
     var body: some View {
         TimelineView(.animation(minimumInterval: 1 / 20, paused: !isPlaying || reduceMotion)) { context in

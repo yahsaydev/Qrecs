@@ -15,47 +15,82 @@ struct TrackTableView: View {
                     systemImage: "waveform"
                 )
             } else {
-                Table(store.trackRows, selection: trackSelection) {
+                Table(store.trackRows, selection: $store.tableSelectionID) {
                     TableColumn(store.preferences.text("Number")) { row in
-                        Text(row.track.surahNumber, format: .number)
-                            .monospacedDigit()
+                        TrackPlaybackCell(
+                            isPlaying: store.playerState.isPlayingTrack(row.id),
+                            isPaused: store.playerState.isPausedTrack(row.id)
+                        ) {
+                            Text(row.track.surahNumber, format: .number)
+                                .monospacedDigit()
+                        }
                     }
                     .width(min: 50, ideal: 60, max: 80)
 
                     TableColumn(store.preferences.text("Surah")) { row in
-                        HStack(spacing: 7) {
-                            if store.playerState.currentTrack?.id == row.id {
-                                PlayingEqualizer(
-                                    isPlaying: store.playerState.status == .playing,
-                                    reduceMotion: reduceMotion
+                        let isPlaying = store.playerState.isPlayingTrack(row.id)
+                        let isPaused = store.playerState.isPausedTrack(row.id)
+                        TrackPlaybackCell(isPlaying: isPlaying, isPaused: isPaused) {
+                            HStack(spacing: 7) {
+                                if isPlaying {
+                                    PlayingEqualizer(
+                                        isPlaying: true,
+                                        reduceMotion: reduceMotion
+                                    )
+                                    .tint(.green)
+                                    .accessibilityLabel(store.preferences.text("Playing"))
+                                    .accessibilityIdentifier("track.\(row.id).playing")
+                                } else if isPaused {
+                                    Image(systemName: "pause.fill")
+                                        .font(.caption2)
+                                        .foregroundStyle(.green.opacity(0.78))
+                                        .accessibilityLabel(store.preferences.text("Paused"))
+                                        .accessibilityIdentifier("track.\(row.id).paused")
+                                }
+                                Text(
+                                    row.surah.displayName(
+                                        language: store.preferences.resolvedLanguage)
                                 )
-                            }
-                            Text(row.surah.displayName(language: store.preferences.resolvedLanguage))
+                                .fontWeight(isPlaying ? .bold : .regular)
                                 .lineLimit(1)
+                            }
                         }
                     }
 
                     TableColumn(store.preferences.text("Status")) { row in
-                        CacheStatusView(state: row.cacheState, preferences: store.preferences)
+                        TrackPlaybackCell(
+                            isPlaying: store.playerState.isPlayingTrack(row.id),
+                            isPaused: store.playerState.isPausedTrack(row.id)
+                        ) {
+                            CacheStatusView(state: row.cacheState, preferences: store.preferences)
+                        }
                     }
                     .width(min: 120, ideal: 150, max: 190)
 
                     TableColumn("") { row in
-                        CacheActionView(store: store, row: row)
+                        TrackPlaybackCell(
+                            isPlaying: store.playerState.isPlayingTrack(row.id),
+                            isPaused: store.playerState.isPausedTrack(row.id),
+                            alignment: .center
+                        ) {
+                            CacheActionView(store: store, row: row)
+                        }
                     }
                     .width(min: 44, ideal: 54, max: 70)
                 }
                 .accessibilityIdentifier("tracks.table")
+                .onKeyPress(.return) {
+                    playSelectedTrack()
+                    return .handled
+                }
                 .contextMenu(forSelectionType: String.self) { selection in
-                    if let track = selectedTrack(in: selection) {
+                    if selectedTrack(in: selection) != nil {
                         Button(store.preferences.text("Play")) {
-                            store.playTrack(track)
+                            playSelectedTrack(in: selection)
                         }
                     }
                 } primaryAction: { selection in
-                    if let track = selectedTrack(in: selection) {
-                        store.playTrack(track)
-                    }
+                    playSelectedTrack(in: selection)
                 }
             }
         }
@@ -71,28 +106,27 @@ struct TrackTableView: View {
         }
     }
 
-    private var trackSelection: Binding<String?> {
-        Binding(
-            get: { store.selectedTrackID },
-            set: { id in
-                guard let id, let track = store.tracks.first(where: { $0.id == id }) else { return }
-                store.selectTrack(track)
-            }
-        )
-    }
-
     private func selectedTrack(in selection: Set<String>) -> Track? {
         guard let id = selection.first else { return nil }
         return store.tracks.first { $0.id == id }
     }
 
+    private func playSelectedTrack(in selection: Set<String>? = nil) {
+        if let id = selection?.first {
+            store.tableSelectionID = id
+        }
+        store.playSelectedTrack()
+    }
+
     private var header: some View {
         HStack(spacing: 10) {
             VStack(alignment: .leading, spacing: 2) {
-                Text(store.selectedReciter?.displayName(
-                    language: store.preferences.resolvedLanguage
-                ) ?? "")
-                    .font(.title2.weight(.semibold))
+                Text(
+                    store.selectedReciter?.displayName(
+                        language: store.preferences.resolvedLanguage
+                    ) ?? ""
+                )
+                .font(.title2.weight(.semibold))
                 Text(store.preferences.text("Quran recordings"))
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -112,9 +146,10 @@ struct TrackTableView: View {
             } label: {
                 Image(systemName: store.trackDirection == .ascending ? "arrow.up" : "arrow.down")
             }
-            .help(store.preferences.text(
-                store.trackDirection == .ascending ? "Sort descending" : "Sort ascending"
-            ))
+            .help(
+                store.preferences.text(
+                    store.trackDirection == .ascending ? "Sort descending" : "Sort ascending"
+                ))
 
             Button {
                 Task {
@@ -149,6 +184,42 @@ struct TrackTableView: View {
     }
 }
 
+private struct TrackPlaybackCell<Content: View>: View {
+    let isPlaying: Bool
+    let isPaused: Bool
+    let alignment: Alignment
+    let content: Content
+
+    init(
+        isPlaying: Bool,
+        isPaused: Bool,
+        alignment: Alignment = .leading,
+        @ViewBuilder content: () -> Content
+    ) {
+        self.isPlaying = isPlaying
+        self.isPaused = isPaused
+        self.alignment = alignment
+        self.content = content()
+    }
+
+    var body: some View {
+        content
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: alignment)
+            .padding(.vertical, 3)
+            .padding(.horizontal, 5)
+            .background {
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .fill(highlightColor)
+            }
+    }
+
+    private var highlightColor: Color {
+        if isPlaying { return .green.opacity(0.13) }
+        if isPaused { return .green.opacity(0.065) }
+        return .clear
+    }
+}
+
 private struct CacheStatusView: View {
     let state: CacheDownloadState?
     @ObservedObject var preferences: AppPreferences
@@ -161,7 +232,7 @@ private struct CacheStatusView: View {
         case .queued:
             Label(preferences.text("Downloading"), systemImage: "clock")
                 .foregroundStyle(.secondary)
-        case let .downloading(progress):
+        case .downloading(let progress):
             HStack(spacing: 6) {
                 ProgressView(value: progress?.fractionCompleted ?? 0)
                     .frame(width: 54)

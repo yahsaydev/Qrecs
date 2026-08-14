@@ -140,6 +140,18 @@ actor GRDBUserLibraryRepository: UserLibraryRepository {
         }
     }
 
+    func removeDownloads(trackIDs: Set<String>) async throws {
+        guard !trackIDs.isEmpty else { return }
+        try await database.write { database in
+            for trackID in trackIDs {
+                try database.execute(
+                    sql: "DELETE FROM downloads WHERE track_id = ?",
+                    arguments: [trackID]
+                )
+            }
+        }
+    }
+
     func cachedTrackIDs() async throws -> Set<String> {
         try await database.read { database in
             Set(try String.fetchAll(database, sql: "SELECT track_id FROM downloads"))

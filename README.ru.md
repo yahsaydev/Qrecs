@@ -78,11 +78,15 @@ sqlite3 Qrecs/Resources/Catalog/catalog.sqlite \
   'select key, value from catalog_meta where key in ("reciter_count", "surah_count", "track_count") order by key;'
 ```
 
-Пересборка по данным репозитория с необязательным подключением проверенного снимка во время сборки:
+Пересборка по данным репозитория с необязательным подключением полностью проверенного снимка и полного аудита прежних аудиоссылок. Команды обхода и аудита описаны в [руководстве по каталогу](CatalogTools/README.md):
 
 ```sh
 python3 CatalogTools/build_catalog.py
-python3 CatalogTools/build_catalog.py --snapshot /path/to/confirmed-surahquran-snapshot.json
+python3 CatalogTools/build_catalog.py \
+  --snapshot /path/to/confirmed-surahquran-snapshot.json \
+  --snapshot-aliases CatalogTools/Data/surahquran_aliases.json \
+  --snapshot-localizations CatalogTools/Data/surahquran_localizations.json \
+  --legacy-audit /path/to/legacy-audit.json
 ```
 
 Из-за песочницы изменяемые данные Qrecs хранятся в `~/Library/Containers/com.heezya.Qrecs/Data/Library/Application Support/Qrecs/`:

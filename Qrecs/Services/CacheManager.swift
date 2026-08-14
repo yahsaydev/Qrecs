@@ -4,6 +4,10 @@ import Foundation
 enum CacheManagerError: Error, Equatable, Sendable {
     case emptyDownloadedFile
     case incompleteDownload
+    case reconciliationRollbackFailed(
+        original: String,
+        rollbackFailures: [String]
+    )
 }
 
 actor CacheManager: CacheManaging {
@@ -17,6 +21,11 @@ actor CacheManager: CacheManaging {
     private struct PendingDownload: Sendable {
         let track: Track
         let generation: OperationGeneration
+    }
+
+    private struct StagedDeletion: Sendable {
+        let originalURL: URL
+        let stagingURL: URL
     }
 
     private let repository: any UserLibraryRepository
@@ -212,6 +221,73 @@ actor CacheManager: CacheManaging {
         states.removeAll()
         pendingDownloads.removeAll()
         reservationTokens.removeAll()
+    }
+
+    /// Removes entries that no longer exist in the bundled catalog. Final files
+    /// are first renamed on the cache volume, so a metadata transaction failure
+    /// can restore them without copying or touching paths outside the cache.
+    func reconcile(validTrackIDs: Set<String>) async throws {
+        let persistedDownloads = try await repository.downloads()
+        let persistedTrackIDs = Set(persistedDownloads.map(\.trackID))
+        let transientTrackIDs = Set(
+            activeTasks.keys
+                + pendingDownloads.map(\.track.id)
+                + knownTracks.keys
+                + reservationTokens.keys
+                + reservationOperations.keys
+        )
+        let staleTrackIDs = persistedTrackIDs
+            .union(transientTrackIDs)
+            .subtracting(validTrackIDs)
+
+        for trackID in staleTrackIDs {
+            beginTrackDeletion(trackID: trackID)
+        }
+        defer {
+            for trackID in staleTrackIDs {
+                endTrackDeletion(trackID: trackID)
+            }
+        }
+
+        for trackID in staleTrackIDs {
+            await cancel(trackID: trackID)
+        }
+
+        let staleDownloads = persistedDownloads.filter {
+            staleTrackIDs.contains($0.trackID)
+        }
+        let stagedDeletions = try stageFilesForDeletion(staleDownloads)
+        do {
+            try await repository.removeDownloads(trackIDs: staleTrackIDs)
+        } catch {
+            let metadataError = error
+            let rollbackErrors = restoreStagedFiles(stagedDeletions)
+            for download in staleDownloads {
+                if let fileURL = validatedFileURL(for: download), isRegularFile(fileURL) {
+                    updateState(.cached(download), trackID: download.trackID)
+                }
+            }
+            if !rollbackErrors.isEmpty {
+                throw CacheManagerError.reconciliationRollbackFailed(
+                    original: String(describing: metadataError),
+                    rollbackFailures: rollbackErrors.map { String(describing: $0) }
+                )
+            }
+            throw metadataError
+        }
+
+        for trackID in staleTrackIDs {
+            states.removeValue(forKey: trackID)
+            knownTracks.removeValue(forKey: trackID)
+        }
+        for download in persistedDownloads where validTrackIDs.contains(download.trackID) {
+            if let fileURL = validatedFileURL(for: download), isRegularFile(fileURL) {
+                updateState(.cached(download), trackID: download.trackID)
+            }
+        }
+        for deletion in stagedDeletions {
+            try removeIfPresent(deletion.stagingURL)
+        }
     }
 
     func totalBytes() async throws -> Int64 {
@@ -499,6 +575,54 @@ actor CacheManager: CacheManaging {
             try removeIfPresent(fileURL)
         }
         try await repository.removeDownload(trackID: trackID)
+    }
+
+    private func stageFilesForDeletion(
+        _ downloads: [CachedDownload]
+    ) throws -> [StagedDeletion] {
+        var staged: [StagedDeletion] = []
+        do {
+            for download in downloads {
+                guard let originalURL = validatedFileURL(for: download),
+                      isRegularFile(originalURL) else {
+                    continue
+                }
+                let stagingURL = paths.audioCacheDirectory.appendingPathComponent(
+                    ".reconcile-\(UUID().uuidString).staging"
+                )
+                try FileManager.default.moveItem(at: originalURL, to: stagingURL)
+                staged.append(StagedDeletion(
+                    originalURL: originalURL,
+                    stagingURL: stagingURL
+                ))
+            }
+            return staged
+        } catch {
+            let stagingError = error
+            let rollbackErrors = restoreStagedFiles(staged)
+            guard !rollbackErrors.isEmpty else { throw stagingError }
+            throw CacheManagerError.reconciliationRollbackFailed(
+                original: String(describing: stagingError),
+                rollbackFailures: rollbackErrors.map { String(describing: $0) }
+            )
+        }
+    }
+
+    private func restoreStagedFiles(_ staged: [StagedDeletion]) -> [Error] {
+        var errors: [Error] = []
+        for deletion in staged.reversed() where FileManager.default.fileExists(
+            atPath: deletion.stagingURL.path
+        ) {
+            do {
+                try FileManager.default.moveItem(
+                    at: deletion.stagingURL,
+                    to: deletion.originalURL
+                )
+            } catch {
+                errors.append(error)
+            }
+        }
+        return errors
     }
 
     private func updateState(_ state: CacheDownloadState, trackID: String) {

@@ -22,31 +22,70 @@ final class LibraryStoreTests: XCTestCase {
         XCTAssertFalse(fixture.store.effectiveOffline)
     }
 
-    func testSelectingTrackPreparesPlayerWithCachedLocalURLWithoutAutoplay() async {
+    func testSelectingTracksForTableDoesNotPrepareOrPlayPlayer() async {
         let fixture = makeFixture(networkAvailable: true)
         await fixture.store.start()
         await fixture.store.selectReciter("r1")
-        guard let track = fixture.store.tracks.first else {
-            return XCTFail("Expected tracks")
-        }
+        let first = fixture.store.tracks[0]
+        let second = fixture.store.tracks[1]
 
-        fixture.store.selectTrack(track)
+        fixture.store.tableSelectionID = first.id
+        fixture.store.tableSelectionID = second.id
 
-        XCTAssertEqual(fixture.player.selectedTrack, track)
-        XCTAssertEqual(fixture.player.selectedQueue.map(\.surahNumber), [1, 2])
-        XCTAssertEqual(
-            fixture.player.selectedLocalURLs[track.id],
-            fixture.paths.audioCacheDirectory.appendingPathComponent("one.mp3")
-        )
+        XCTAssertEqual(fixture.store.tableSelectionID, second.id)
+        XCTAssertNil(fixture.player.selectedTrack)
+        XCTAssertEqual(fixture.player.selectCount, 0)
         XCTAssertEqual(fixture.player.playCount, 0)
-        XCTAssertEqual(fixture.store.selectedTrackID, track.id)
+        XCTAssertNil(fixture.store.playerState.currentTrack)
+    }
+
+    func testPlayerUpdateDoesNotStealTableSelection() async {
+        let fixture = makeFixture(networkAvailable: true)
+        defer { fixture.player.finishUpdates() }
+        await fixture.store.start()
+        await fixture.store.selectReciter("r1")
+        fixture.store.tableSelectionID = fixture.store.tracks[1].id
+        var state = fixture.player.state
+        state.currentTrack = fixture.store.tracks[0]
+        state.status = .playing
+        let observed = expectation(description: "store observes player update")
+        let cancellable = fixture.store.$playerState
+            .dropFirst()
+            .filter { $0.currentTrack?.id == state.currentTrack?.id }
+            .prefix(1)
+            .sink { _ in observed.fulfill() }
+
+        fixture.player.send(state)
+        await fulfillment(of: [observed], timeout: 1)
+
+        XCTAssertEqual(fixture.store.playerState.currentTrack, fixture.store.tracks[0])
+        XCTAssertEqual(fixture.store.tableSelectionID, fixture.store.tracks[1].id)
+        withExtendedLifetime(cancellable) {}
+    }
+
+    func testPlaySelectedTrackUsesCurrentTableSelectionWithoutDuplicatePlayerAction() async {
+        let fixture = makeFixture(networkAvailable: true)
+        await fixture.store.start()
+        await fixture.store.selectReciter("r1")
+        let selectedTrack = fixture.store.tracks[1]
+        fixture.store.tableSelectionID = selectedTrack.id
+
+        fixture.store.playSelectedTrack()
+        fixture.store.playSelectedTrack()
+
+        XCTAssertEqual(fixture.player.selectedTrack, selectedTrack)
+        XCTAssertEqual(fixture.player.selectCount, 1)
+        XCTAssertEqual(fixture.player.playCount, 1)
+        XCTAssertEqual(fixture.store.tableSelectionID, selectedTrack.id)
     }
 
     func testPlayTrackSelectsNewTrackFromZeroAndStartsPlayback() async {
         let fixture = makeFixture(networkAvailable: true)
         await fixture.store.start()
         await fixture.store.selectReciter("r1")
-        fixture.store.selectTrack(fixture.store.tracks[0])
+        let originalSelection = fixture.store.tracks[0]
+        fixture.store.tableSelectionID = originalSelection.id
+        fixture.store.playTrack(originalSelection)
         fixture.player.state.elapsed = 37
         let target = fixture.store.tracks[1]
 
@@ -54,9 +93,9 @@ final class LibraryStoreTests: XCTestCase {
 
         XCTAssertEqual(fixture.player.selectedTrack, target)
         XCTAssertEqual(fixture.player.selectCount, 2)
-        XCTAssertEqual(fixture.player.playCount, 1)
+        XCTAssertEqual(fixture.player.playCount, 2)
         XCTAssertEqual(fixture.player.state.elapsed, 0)
-        XCTAssertEqual(fixture.store.selectedTrackID, target.id)
+        XCTAssertEqual(fixture.store.tableSelectionID, originalSelection.id)
         XCTAssertEqual(fixture.store.playerState.status, .playing)
     }
 
@@ -65,35 +104,38 @@ final class LibraryStoreTests: XCTestCase {
         await fixture.store.start()
         await fixture.store.selectReciter("r1")
         let track = fixture.store.tracks[0]
-        fixture.store.selectTrack(track)
+        fixture.store.playTrack(track)
+        fixture.store.playPause()
         fixture.player.state.elapsed = 37
+        let selectCount = fixture.player.selectCount
+        let playCount = fixture.player.playCount
 
         fixture.store.playTrack(track)
 
-        XCTAssertEqual(fixture.player.selectCount, 1)
-        XCTAssertEqual(fixture.player.playCount, 1)
+        XCTAssertEqual(fixture.player.selectCount, selectCount)
+        XCTAssertEqual(fixture.player.playCount, playCount + 1)
         XCTAssertEqual(fixture.player.state.elapsed, 37)
         XCTAssertEqual(fixture.store.playerState.status, .playing)
     }
 
-    func testPlayTrackResumesCurrentPausedTrackAfterLibrarySelectionWasCleared() async {
+    func testPlayTrackResumesCurrentPausedTrackWithoutChangingTableSelection() async {
         let fixture = makeFixture(networkAvailable: true)
         await fixture.store.start()
         await fixture.store.selectReciter("r1")
         let track = fixture.store.tracks[0]
-        fixture.store.selectTrack(track)
+        fixture.store.playTrack(track)
+        fixture.store.playPause()
         fixture.player.state.elapsed = 37
-
-        await fixture.store.selectReciter("r2")
-        await fixture.store.selectReciter("r1")
-        XCTAssertNil(fixture.store.selectedTrackID)
+        fixture.store.tableSelectionID = fixture.store.tracks[1].id
+        let selectCount = fixture.player.selectCount
+        let playCount = fixture.player.playCount
 
         fixture.store.playTrack(track)
 
-        XCTAssertEqual(fixture.player.selectCount, 1)
-        XCTAssertEqual(fixture.player.playCount, 1)
+        XCTAssertEqual(fixture.player.selectCount, selectCount)
+        XCTAssertEqual(fixture.player.playCount, playCount + 1)
         XCTAssertEqual(fixture.player.state.elapsed, 37)
-        XCTAssertEqual(fixture.store.selectedTrackID, track.id)
+        XCTAssertEqual(fixture.store.tableSelectionID, fixture.store.tracks[1].id)
         XCTAssertEqual(fixture.store.playerState.status, .playing)
     }
 
@@ -102,8 +144,7 @@ final class LibraryStoreTests: XCTestCase {
         await fixture.store.start()
         await fixture.store.selectReciter("r1")
         let track = fixture.store.tracks[0]
-        fixture.store.selectTrack(track)
-        fixture.store.playPause()
+        fixture.store.playTrack(track)
         let selectCount = fixture.player.selectCount
         let playCount = fixture.player.playCount
 
@@ -135,7 +176,7 @@ final class LibraryStoreTests: XCTestCase {
         let fixture = makeFixture(networkAvailable: true)
         await fixture.store.start()
         await fixture.store.selectReciter("r1")
-        fixture.store.selectTrack(fixture.store.tracks[0])
+        fixture.store.playTrack(fixture.store.tracks[0])
         let updated = expectation(description: "active player receives cached-only queue")
         fixture.player.onAvailabilityUpdate = { queue, _ in
             if queue.map(\.id) == ["r1:1"] { updated.fulfill() }
@@ -595,7 +636,7 @@ final class LibraryStoreTests: XCTestCase {
         let fixture = makeFixture(networkAvailable: true)
         await fixture.store.start()
         await fixture.store.selectReciter("r1")
-        fixture.store.selectTrack(fixture.store.tracks[0])
+        fixture.store.playTrack(fixture.store.tracks[0])
 
         fixture.store.preferences.manualOffline = true
 
@@ -609,7 +650,7 @@ final class LibraryStoreTests: XCTestCase {
         let fixture = makeFixture(networkAvailable: true)
         await fixture.store.start()
         await fixture.store.selectReciter("r1")
-        fixture.store.selectTrack(fixture.store.tracks[0])
+        fixture.store.playTrack(fixture.store.tracks[0])
         let track = fixture.store.tracks[1]
         await fixture.store.cacheTrack(track)
         let cached = CachedDownload(
@@ -640,7 +681,7 @@ final class LibraryStoreTests: XCTestCase {
         await fixture.store.start()
         await fixture.store.selectReciter("r1")
         let track = fixture.store.tracks[0]
-        fixture.store.selectTrack(track)
+        fixture.store.playTrack(track)
         fixture.store.preferences.manualOffline = true
         XCTAssertEqual(fixture.player.availabilityQueues.last?.map(\.id), [track.id])
 
@@ -656,7 +697,7 @@ final class LibraryStoreTests: XCTestCase {
         defer { fixture.player.finishUpdates() }
         await fixture.store.start()
         await fixture.store.selectReciter("r1")
-        fixture.store.selectTrack(fixture.store.tracks[0])
+        fixture.store.playTrack(fixture.store.tracks[0])
         var failedState = fixture.player.state
         failedState.status = .failed(.playback("decoder failed"))
         let observed = expectation(description: "store observes playback failure")
@@ -778,6 +819,9 @@ private actor StoreCatalog: CatalogRepository {
     func fetchReciters() -> [Reciter] { reciters }
     func fetchSurahs() -> [Surah] { surahs }
     func fetchTracks(reciterID: String) -> [Track] { tracks[reciterID] ?? [] }
+    func fetchTrackIDs() -> Set<String> {
+        Set(tracks.values.flatMap { $0 }.map(\.id))
+    }
 }
 
 private actor StoreUserLibrary: UserLibraryRepository {
@@ -824,6 +868,9 @@ private actor StoreUserLibrary: UserLibraryRepository {
         storedDownloads.append(download)
     }
     func removeDownload(trackID: String) { storedDownloads.removeAll { $0.trackID == trackID } }
+    func removeDownloads(trackIDs: Set<String>) {
+        storedDownloads.removeAll { trackIDs.contains($0.trackID) }
+    }
     func cachedTrackIDs() -> Set<String> { Set(storedDownloads.map(\.trackID)) }
     func cachedReciterIDs() -> Set<String> { Set(storedDownloads.map(\.reciterID)) }
     func totalDownloadedBytes() -> Int64 {
@@ -907,6 +954,7 @@ private actor StoreCache: CacheManaging {
     func remove(trackID: String) { states.removeValue(forKey: trackID) }
     func removeAll(reciterID: String) {}
     func clearAll() { states.removeAll() }
+    func reconcile(validTrackIDs: Set<String>) {}
     func totalBytes() -> Int64 { 0 }
     func state(trackID: String) -> CacheDownloadState? { states[trackID] }
     func snapshot() -> CacheSnapshot { CacheSnapshot(states: states) }
@@ -1020,7 +1068,7 @@ private final class StorePlayer: QuranPlaying {
         playCount += 1
         state.status = .playing
     }
-    func pause() {}
+    func pause() { state.status = .paused }
     func stop() {}
     func previous() {}
     func next() {}

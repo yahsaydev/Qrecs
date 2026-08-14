@@ -35,7 +35,7 @@ final class LibraryStore: ObservableObject {
     @Published private(set) var ambientState: AmbientMixState = .default
     @Published private(set) var nonfatalError: String?
     @Published var selectedReciterID: String?
-    @Published private(set) var selectedTrackID: String?
+    @Published var tableSelectionID: String?
     @Published var reciterSearch = ""
     @Published var trackSearch = ""
     @Published var reciterDirection: SortDirection = .ascending
@@ -187,7 +187,7 @@ final class LibraryStore: ObservableObject {
 
     func selectReciter(_ id: String?) async {
         tracks = []
-        selectedTrackID = nil
+        tableSelectionID = nil
         selectedReciterID = id
         guard let id else { return }
         do {
@@ -213,21 +213,9 @@ final class LibraryStore: ObservableObject {
         }
     }
 
-    func selectTrack(_ track: Track) {
-        guard tracks.contains(where: { $0.id == track.id }) else { return }
-        selectedTrackID = track.id
-        player.select(
-            track: track,
-            queue: playbackQueue(for: track.reciterID),
-            localURLs: localURLs()
-        )
-        playerState = player.state
-    }
-
     func playTrack(_ track: Track) {
         guard tracks.contains(where: { $0.id == track.id }) else { return }
         if playerState.currentTrack?.id == track.id {
-            selectedTrackID = track.id
             switch playerState.status {
             case .playing:
                 return
@@ -239,9 +227,19 @@ final class LibraryStore: ObservableObject {
                 break
             }
         }
-        selectTrack(track)
+        player.select(
+            track: track,
+            queue: playbackQueue(for: track.reciterID),
+            localURLs: localURLs()
+        )
         player.play()
         playerState = player.state
+    }
+
+    func playSelectedTrack() {
+        guard let tableSelectionID,
+              let track = tracks.first(where: { $0.id == tableSelectionID }) else { return }
+        playTrack(track)
     }
 
     func toggleFavorite(reciterID: String) async {
@@ -489,7 +487,6 @@ final class LibraryStore: ObservableObject {
                 for await state in playerStream {
                     guard !Task.isCancelled else { return }
                     self?.playerState = state
-                    self?.selectedTrackID = state.currentTrack?.id ?? self?.selectedTrackID
                 }
             },
             Task { @MainActor [weak self] in

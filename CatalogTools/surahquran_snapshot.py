@@ -6,7 +6,7 @@ import json
 import copy
 from pathlib import Path
 
-from surahquran import parse_reciter_profile, stable_reciter_id
+from surahquran import parse_reciter_profile, resolved_reciter_id, stable_reciter_id
 
 
 def build_fixture_snapshot(fixture_root):
@@ -27,6 +27,7 @@ def build_fixture_snapshot(fixture_root):
             {
                 "site_id": site_id,
                 "stable_id": stable_reciter_id(site_id),
+                "resolved_id": resolved_reciter_id(site_id),
                 "source_name": profile.name,
                 "name_ru": entry["name_ru"],
                 "name_en": entry["name_en"],
@@ -48,16 +49,14 @@ def build_fixture_snapshot(fixture_root):
     }
 
 
-def confirm_snapshot(snapshot, auditor):
-    """Apply an audit report to candidates and mark only conclusive output confirmed."""
+def apply_audit_report(snapshot, report):
+    """Apply one already-computed report to a candidate snapshot."""
     confirmed = copy.deepcopy(snapshot)
     tracks = [
         track
         for reciter in confirmed["reciters"]
         for track in reciter["tracks"]
     ]
-    urls = [track["url"] for track in tracks]
-    report = auditor.audit(urls)
     status_by_url = {}
     for status in ("available", "unavailable", "inconclusive"):
         for item in getattr(report, status):
@@ -68,6 +67,22 @@ def confirm_snapshot(snapshot, auditor):
         track["status"] != "inconclusive" for track in tracks
     )
     return confirmed
+
+
+def audit_snapshot(snapshot, auditor):
+    """Audit every unique candidate URL once and return both derived artifacts."""
+    urls = [
+        track["url"]
+        for reciter in snapshot["reciters"]
+        for track in reciter["tracks"]
+    ]
+    report = auditor.audit(urls)
+    return apply_audit_report(snapshot, report), report
+
+
+def confirm_snapshot(snapshot, auditor):
+    """Backward-compatible helper returning only the confirmed candidate document."""
+    return audit_snapshot(snapshot, auditor)[0]
 
 
 def main():

@@ -376,6 +376,217 @@ final class CacheManagerTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: outsideURL), Data("outside".utf8))
     }
 
+    func testCatalogReconciliationRemovesOnlyStaleDownloadsAndIsIdempotent() async throws {
+        let fixture = try await CacheFixture()
+        defer { fixture.remove() }
+        let valid = makeTrack(id: "valid", reciterID: "r1")
+        let stale = makeTrack(id: "stale", reciterID: "r2")
+
+        for track in [valid, stale] {
+            let fileName = CacheManager.finalFileName(trackID: track.id)
+            try Data(track.id.utf8).write(
+                to: fixture.paths.audioCacheDirectory.appendingPathComponent(fileName)
+            )
+            try await fixture.repository.upsertDownload(CachedDownload(
+                trackID: track.id,
+                reciterID: track.reciterID,
+                relativePath: fileName,
+                byteCount: Int64(track.id.utf8.count),
+                etag: nil,
+                updatedAt: .now
+            ))
+        }
+
+        try await fixture.manager.reconcile(validTrackIDs: [valid.id])
+        try await fixture.manager.reconcile(validTrackIDs: [valid.id])
+
+        let cachedTrackIDs = try await fixture.repository.cachedTrackIDs()
+        XCTAssertEqual(cachedTrackIDs, [valid.id])
+        XCTAssertEqual(
+            try cacheDirectoryEntries(fixture.paths),
+            [CacheManager.finalFileName(trackID: valid.id)]
+        )
+        let state = await fixture.manager.state(trackID: valid.id)
+        guard case let .cached(download) = state else {
+            return XCTFail("Expected valid download to remain cached")
+        }
+        XCTAssertEqual(download.trackID, valid.id)
+        let staleState = await fixture.manager.state(trackID: stale.id)
+        XCTAssertNil(staleState)
+    }
+
+    func testCatalogReconciliationNeverTraversesOutsideAudioCache() async throws {
+        let fixture = try await CacheFixture()
+        defer { fixture.remove() }
+        let outsideURL = fixture.paths.audioCacheDirectory
+            .deletingLastPathComponent()
+            .appendingPathComponent("outside.mp3")
+        try Data("outside".utf8).write(to: outsideURL)
+        try await fixture.repository.upsertDownload(CachedDownload(
+            trackID: "stale-traversal",
+            reciterID: "r1",
+            relativePath: "../outside.mp3",
+            byteCount: 7,
+            etag: nil,
+            updatedAt: .now
+        ))
+
+        try await fixture.manager.reconcile(validTrackIDs: [])
+
+        let staleDownload = try await fixture.repository.download(trackID: "stale-traversal")
+        XCTAssertNil(staleDownload)
+        XCTAssertEqual(try Data(contentsOf: outsideURL), Data("outside".utf8))
+    }
+
+    func testCatalogReconciliationRestoresFilesWhenAtomicMetadataRemovalFails() async throws {
+        let root = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let paths = try AppPaths(baseDirectory: root)
+        try paths.prepareDirectories()
+        let repository = try GRDBUserLibraryRepository(databaseURL: paths.userDatabaseURL)
+        let failingRepository = PausingUserLibraryRepository(
+            repository: repository,
+            pauseUpserts: false,
+            failBatchRemoval: true
+        )
+        let downloader = ControllableDownloadClient(
+            temporaryDirectory: root.appendingPathComponent("Transfers")
+        )
+        let manager = try await CacheManager.make(
+            repository: failingRepository,
+            downloader: downloader,
+            paths: paths
+        )
+        let fileName = CacheManager.finalFileName(trackID: "stale")
+        let fileURL = paths.audioCacheDirectory.appendingPathComponent(fileName)
+        try Data("stale".utf8).write(to: fileURL)
+        try await repository.upsertDownload(CachedDownload(
+            trackID: "stale",
+            reciterID: "r1",
+            relativePath: fileName,
+            byteCount: 5,
+            etag: nil,
+            updatedAt: .now
+        ))
+
+        do {
+            try await manager.reconcile(validTrackIDs: [])
+            XCTFail("Expected atomic metadata removal failure")
+        } catch CacheReconciliationTestError.batchRemovalFailed {
+            // Expected.
+        }
+
+        let stored = try await repository.download(trackID: "stale")
+        XCTAssertNotNil(stored)
+        XCTAssertEqual(try Data(contentsOf: fileURL), Data("stale".utf8))
+        XCTAssertEqual(try cacheDirectoryEntries(paths), [fileName])
+    }
+
+    func testCatalogReconciliationDoesNotSweepAValidDownloadCompletingConcurrently() async throws {
+        let root = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let paths = try AppPaths(baseDirectory: root)
+        try paths.prepareDirectories()
+        let repository = try GRDBUserLibraryRepository(databaseURL: paths.userDatabaseURL)
+        let pausingRepository = PausingUserLibraryRepository(
+            repository: repository,
+            pauseUpserts: false,
+            pauseBatchRemoval: true
+        )
+        let downloader = ControllableDownloadClient(
+            temporaryDirectory: paths.audioCacheDirectory
+        )
+        let manager = try await CacheManager.make(
+            repository: pausingRepository,
+            downloader: downloader,
+            paths: paths
+        )
+        let track = makeTrack(id: "valid-concurrent", reciterID: "r1")
+        try await manager.cache(track: track)
+        await downloader.waitUntilStarted(track.url)
+
+        let reconciliation = Task {
+            try await manager.reconcile(validTrackIDs: [track.id])
+        }
+        await pausingRepository.waitUntilBatchRemovalPaused()
+        try await downloader.succeed(track.url, bytes: Data("valid".utf8), etag: nil)
+        await pausingRepository.resumeBatchRemoval()
+        try await reconciliation.value
+
+        let cached = try await awaitCached(manager: manager, trackID: track.id)
+        XCTAssertEqual(cached.byteCount, 5)
+        let persisted = try await repository.download(trackID: track.id)
+        XCTAssertEqual(persisted, cached)
+        let downloadsCalls = await pausingRepository.downloadsInvocationCount()
+        XCTAssertEqual(
+            downloadsCalls,
+            2,
+            "Reconciliation must not run the directory-wide startup sweep"
+        )
+    }
+
+    func testCatalogReconciliationAttemptsEveryRollbackAndPreservesMetadataFailure() async throws {
+        let root = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let paths = try AppPaths(baseDirectory: root)
+        try paths.prepareDirectories()
+        let repository = try GRDBUserLibraryRepository(databaseURL: paths.userDatabaseURL)
+        let pausingRepository = PausingUserLibraryRepository(
+            repository: repository,
+            pauseUpserts: false,
+            failBatchRemoval: true,
+            pauseBatchRemoval: true
+        )
+        let downloader = ControllableDownloadClient(
+            temporaryDirectory: root.appendingPathComponent("Transfers")
+        )
+        let manager = try await CacheManager.make(
+            repository: pausingRepository,
+            downloader: downloader,
+            paths: paths
+        )
+        let firstID = "a-stale"
+        let collisionID = "z-stale"
+        let firstURL = paths.audioCacheDirectory.appendingPathComponent(
+            CacheManager.finalFileName(trackID: firstID)
+        )
+        let collisionURL = paths.audioCacheDirectory.appendingPathComponent(
+            CacheManager.finalFileName(trackID: collisionID)
+        )
+        for (trackID, fileURL) in [(firstID, firstURL), (collisionID, collisionURL)] {
+            try Data(trackID.utf8).write(to: fileURL)
+            try await repository.upsertDownload(CachedDownload(
+                trackID: trackID,
+                reciterID: "r1",
+                relativePath: fileURL.lastPathComponent,
+                byteCount: Int64(trackID.utf8.count),
+                etag: nil,
+                updatedAt: .now
+            ))
+        }
+
+        let reconciliation = Task {
+            try await manager.reconcile(validTrackIDs: [])
+        }
+        await pausingRepository.waitUntilBatchRemovalPaused()
+        try Data("collision".utf8).write(to: collisionURL)
+        await pausingRepository.resumeBatchRemoval()
+
+        let caughtError: Error
+        do {
+            try await reconciliation.value
+            return XCTFail("Expected reconciliation rollback failure")
+        } catch {
+            caughtError = error
+        }
+
+        XCTAssertEqual(try Data(contentsOf: firstURL), Data(firstID.utf8))
+        XCTAssertEqual(try Data(contentsOf: collisionURL), Data("collision".utf8))
+        let remainingTrackIDs = try await repository.cachedTrackIDs()
+        XCTAssertEqual(remainingTrackIDs, [firstID, collisionID])
+        XCTAssertTrue(String(describing: caughtError).contains("batchRemovalFailed"))
+    }
+
     func testNeverRunsMoreThanTwoDownloadsConcurrently() async throws {
         let fixture = try await CacheFixture()
         defer { fixture.remove() }
@@ -481,6 +692,10 @@ private final class ReservationWaitObserver: @unchecked Sendable {
 private enum CacheStateWaitError: Error {
     case terminalState(CacheDownloadState)
     case streamEnded
+}
+
+private enum CacheReconciliationTestError: Error {
+    case batchRemovalFailed
 }
 
 private func awaitCached(
@@ -608,6 +823,8 @@ private actor PausingUserLibraryRepository: UserLibraryRepository {
     private let pauseAfterDownloadLookupNumber: Int?
     private let pauseDownloadsCallNumber: Int?
     private let pauseFirstRemoveDownload: Bool
+    private let failBatchRemoval: Bool
+    private let pauseBatchRemoval: Bool
     private var upsertStarted = false
     private var upsertCancellationObserved = false
     private var startWaiters: [CheckedContinuation<Void, Never>] = []
@@ -630,6 +847,9 @@ private actor PausingUserLibraryRepository: UserLibraryRepository {
     private var removeDownloadPaused = false
     private var removeDownloadPausedWaiters: [CheckedContinuation<Void, Never>] = []
     private var removeDownloadResumeContinuation: CheckedContinuation<Void, Never>?
+    private var batchRemovalPaused = false
+    private var batchRemovalPausedWaiters: [CheckedContinuation<Void, Never>] = []
+    private var batchRemovalResumeContinuation: CheckedContinuation<Void, Never>?
 
     init(
         repository: GRDBUserLibraryRepository,
@@ -638,7 +858,9 @@ private actor PausingUserLibraryRepository: UserLibraryRepository {
         pauseAfterUpsertCommit: Bool = false,
         pauseAfterDownloadLookupNumber: Int? = nil,
         pauseDownloadsCallNumber: Int? = nil,
-        pauseFirstRemoveDownload: Bool = false
+        pauseFirstRemoveDownload: Bool = false,
+        failBatchRemoval: Bool = false,
+        pauseBatchRemoval: Bool = false
     ) {
         self.repository = repository
         self.pauseUpserts = pauseUpserts
@@ -647,6 +869,8 @@ private actor PausingUserLibraryRepository: UserLibraryRepository {
         self.pauseAfterDownloadLookupNumber = pauseAfterDownloadLookupNumber
         self.pauseDownloadsCallNumber = pauseDownloadsCallNumber
         self.pauseFirstRemoveDownload = pauseFirstRemoveDownload
+        self.failBatchRemoval = failBatchRemoval
+        self.pauseBatchRemoval = pauseBatchRemoval
     }
 
     func waitUntilUpsertStarted() async {
@@ -704,6 +928,8 @@ private actor PausingUserLibraryRepository: UserLibraryRepository {
         downloadsResumeContinuation = nil
     }
 
+    func downloadsInvocationCount() -> Int { downloadsCallCount }
+
     func waitUntilRemoveDownloadPaused() async {
         if removeDownloadPaused { return }
         await withCheckedContinuation { removeDownloadPausedWaiters.append($0) }
@@ -712,6 +938,16 @@ private actor PausingUserLibraryRepository: UserLibraryRepository {
     func resumeRemoveDownload() {
         removeDownloadResumeContinuation?.resume()
         removeDownloadResumeContinuation = nil
+    }
+
+    func waitUntilBatchRemovalPaused() async {
+        if batchRemovalPaused { return }
+        await withCheckedContinuation { batchRemovalPausedWaiters.append($0) }
+    }
+
+    func resumeBatchRemoval() {
+        batchRemovalResumeContinuation?.resume()
+        batchRemovalResumeContinuation = nil
     }
 
     func favoriteReciterIDs() async throws -> Set<String> {
@@ -800,6 +1036,19 @@ private actor PausingUserLibraryRepository: UserLibraryRepository {
             await withCheckedContinuation { removeDownloadResumeContinuation = $0 }
         }
         try await repository.removeDownload(trackID: trackID)
+    }
+
+    func removeDownloads(trackIDs: Set<String>) async throws {
+        if pauseBatchRemoval {
+            batchRemovalPaused = true
+            for waiter in batchRemovalPausedWaiters { waiter.resume() }
+            batchRemovalPausedWaiters.removeAll()
+            await withCheckedContinuation { batchRemovalResumeContinuation = $0 }
+        }
+        if failBatchRemoval {
+            throw CacheReconciliationTestError.batchRemovalFailed
+        }
+        try await repository.removeDownloads(trackIDs: trackIDs)
     }
 
     func cachedTrackIDs() async throws -> Set<String> {

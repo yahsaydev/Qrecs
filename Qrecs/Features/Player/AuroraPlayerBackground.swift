@@ -4,95 +4,77 @@ struct AuroraPlayerBackground: View {
     let isPlaying: Bool
     let enabledSounds: [AmbientSound]
     let reduceMotion: Bool
+    let pointerOffset: CGSize
 
-    @State private var motion = PlaybackMotionModel(staticPhase: 0.25)
-    @State private var pointerOffset = CGSize.zero
-
-    private let fields = [
-        AuroraField(x: 0.08, y: 0.18, dx: 0.16, dy: 0.12, speed: 0.83, offset: 0.0, size: 0.72, parallax: 8),
-        AuroraField(x: 0.34, y: 0.82, dx: 0.20, dy: 0.16, speed: 0.61, offset: 1.1, size: 0.86, parallax: 5),
-        AuroraField(x: 0.56, y: 0.24, dx: 0.18, dy: 0.13, speed: 0.73, offset: 2.4, size: 0.68, parallax: 11),
-        AuroraField(x: 0.78, y: 0.70, dx: 0.17, dy: 0.19, speed: 0.52, offset: 3.3, size: 0.82, parallax: 7),
-        AuroraField(x: 0.95, y: 0.14, dx: 0.13, dy: 0.12, speed: 0.67, offset: 4.7, size: 0.62, parallax: 13),
-        AuroraField(x: 0.50, y: 0.52, dx: 0.25, dy: 0.10, speed: 0.41, offset: 5.5, size: 0.92, parallax: 4),
-    ]
+    @State private var phaseController = AuroraPhaseController(staticPhase: 0.25)
 
     private var fieldColors: [AuroraFieldColor] {
         AuroraPaletteModel.fieldColors(
             enabledAccents: enabledSounds.map(\.accent),
-            fieldCount: fields.count
+            fieldCount: AuroraSceneModel.fields.count
         )
     }
 
     var body: some View {
-        GeometryReader { proxy in
-            TimelineView(.animation(minimumInterval: 1 / 30, paused: !isPlaying || reduceMotion)) { context in
-                let phase = motion.phase(
-                    at: context.date.timeIntervalSinceReferenceDate,
-                    rate: 0.35
+        TimelineView(.animation(minimumInterval: 1 / 30, paused: !isPlaying || reduceMotion)) { context in
+            let phase = phaseController.phase(
+                at: context.date.timeIntervalSinceReferenceDate,
+                rate: 0.35
+            )
+            Canvas(opaque: false, rendersAsynchronously: true) { context, size in
+                let positions = AuroraSceneModel.positions(
+                    in: size,
+                    phase: phase,
+                    pointerOffset: reduceMotion ? .zero : pointerOffset
                 )
-                ZStack {
-                    LinearGradient(
-                        colors: [
-                            Color(red: 0.015, green: 0.15, blue: 0.11, opacity: 0.58),
-                            Color(red: 0.02, green: 0.28, blue: 0.20, opacity: 0.42),
-                        ],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
 
-                    ForEach(Array(fields.enumerated()), id: \.offset) { index, field in
-                        let diameter = max(proxy.size.width, proxy.size.height) * field.size
-                        Circle()
-                            .fill(
-                                RadialGradient(
-                                    colors: [color(for: fieldColors[index]).opacity(0.42), .clear],
-                                    center: .center,
-                                    startRadius: 0,
-                                    endRadius: diameter * 0.5
-                                )
+                for index in AuroraSceneModel.fields.indices {
+                    let field = AuroraSceneModel.fields[index]
+                    let diameter = field.diameter(in: size)
+                    let center = positions[index]
+                    let rect = CGRect(
+                        x: center.x - diameter / 2,
+                        y: center.y - diameter / 2,
+                        width: diameter,
+                        height: diameter
+                    )
+                    context.drawLayer { layer in
+                        layer.addFilter(.blur(radius: diameter * 0.16))
+                        layer.fill(
+                            Path(ellipseIn: rect),
+                            with: .radialGradient(
+                                Gradient(colors: [
+                                    color(for: fieldColors[index]).opacity(0.42),
+                                    .clear,
+                                ]),
+                                center: center,
+                                startRadius: 0,
+                                endRadius: diameter / 2
                             )
-                            .frame(width: diameter, height: diameter)
-                            .position(
-                                x: proxy.size.width * (
-                                    field.x + sin(phase * field.speed + field.offset) * field.dx
-                                ) + pointerOffset.width * field.parallax,
-                                y: proxy.size.height * (
-                                    field.y + cos(phase * field.speed * 0.87 + field.offset) * field.dy
-                                ) + pointerOffset.height * field.parallax
-                            )
-                            .blur(radius: diameter * 0.16)
+                        )
                     }
                 }
             }
-            .onContinuousHover { hover in
-                guard !reduceMotion else {
-                    pointerOffset = .zero
-                    return
-                }
-                switch hover {
-                case let .active(point):
-                    pointerOffset = CGSize(
-                        width: point.x / max(proxy.size.width, 1) - 0.5,
-                        height: point.y / max(proxy.size.height, 1) - 0.5
-                    )
-                case .ended:
-                    pointerOffset = .zero
-                }
+            .background {
+                LinearGradient(
+                    colors: [
+                        Color(red: 0.015, green: 0.15, blue: 0.11, opacity: 0.58),
+                        Color(red: 0.02, green: 0.28, blue: 0.20, opacity: 0.42),
+                    ],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
             }
         }
-        .animation(reduceMotion ? nil : .easeOut(duration: 0.45), value: pointerOffset)
-        .onAppear(perform: synchronizeMotion)
-        .onChange(of: isPlaying) { _, _ in synchronizeMotion() }
-        .onChange(of: reduceMotion) { _, _ in
-            if reduceMotion { pointerOffset = .zero }
-            synchronizeMotion()
-        }
+        .onAppear(perform: synchronizePhase)
+        .onChange(of: isPlaying) { _, _ in synchronizePhase() }
+        .onChange(of: reduceMotion) { _, _ in synchronizePhase() }
+        .allowsHitTesting(false)
         .accessibilityHidden(true)
     }
 
-    private func synchronizeMotion() {
-        motion.transition(
+    private func synchronizePhase() {
+        phaseController.transition(
             isPlaying: isPlaying,
             reduceMotion: reduceMotion,
             at: Date.timeIntervalSinceReferenceDate
@@ -112,15 +94,4 @@ struct AuroraPlayerBackground: View {
             return Color(ambientAccent: accent)
         }
     }
-}
-
-private struct AuroraField {
-    let x: Double
-    let y: Double
-    let dx: Double
-    let dy: Double
-    let speed: Double
-    let offset: Double
-    let size: Double
-    let parallax: Double
 }
