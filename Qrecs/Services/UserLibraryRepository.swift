@@ -8,6 +8,7 @@ protocol UserLibraryRepository: Sendable {
     func download(trackID: String) async throws -> CachedDownload?
     func upsertDownload(_ download: CachedDownload) async throws
     func removeDownload(trackID: String) async throws
+    func removeDownloads(trackIDs: Set<String>) async throws
     func cachedTrackIDs() async throws -> Set<String>
     func cachedReciterIDs() async throws -> Set<String>
     func totalDownloadedBytes() async throws -> Int64

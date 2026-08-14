@@ -27,7 +27,7 @@ final class CatalogRepositoryTests: XCTestCase {
         let reciters = try await repository.fetchReciters()
         let surahs = try await repository.fetchSurahs()
 
-        XCTAssertEqual(reciters.count, 172)
+        XCTAssertEqual(reciters.count, 173)
         XCTAssertEqual(surahs.count, 114)
         XCTAssertEqual(
             reciters.first(where: { $0.id == "reciter-118" })?.nameEN,
@@ -41,22 +41,48 @@ final class CatalogRepositoryTests: XCTestCase {
         let reciters = try await repository.fetchReciters()
         let surahs = try await repository.fetchSurahs()
 
-        XCTAssertEqual(reciters.count, 172)
+        XCTAssertEqual(reciters.count, 173)
         XCTAssertEqual(surahs.count, 114)
         XCTAssertEqual(surahs.first, Surah(number: 1, nameRU: "Аль-Фатиха", nameEN: "Al-Fatihah"))
         XCTAssertEqual(surahs.last, Surah(number: 114, nameRU: "Ан-Нас", nameEN: "An-Nas"))
     }
 
-    func testEveryReciterHasAll114Tracks() async throws {
+    func testEveryReciterHasAUniqueOrderedSparseSafeTrackSet() async throws {
         let repository = try GRDBCatalogRepository(databaseURL: generatedCatalogURL)
         let reciters = try await repository.fetchReciters()
+        var union: Set<String> = []
 
         for reciter in reciters {
             let tracks = try await repository.fetchTracks(reciterID: reciter.id)
-            XCTAssertEqual(tracks.count, 114, "Unexpected track count for \(reciter.id)")
-            XCTAssertEqual(tracks.first?.surahNumber, 1)
-            XCTAssertEqual(tracks.last?.surahNumber, 114)
+            XCTAssertFalse(tracks.isEmpty, "Empty track set for \(reciter.id)")
+            XCTAssertEqual(tracks.map(\.surahNumber), tracks.map(\.surahNumber).sorted())
+            XCTAssertEqual(Set(tracks.map(\.surahNumber)).count, tracks.count)
+            XCTAssertTrue(tracks.allSatisfy { $0.reciterID == reciter.id })
+            XCTAssertTrue(tracks.allSatisfy { (1...114).contains($0.surahNumber) })
+            union.formUnion(tracks.map(\.id))
         }
+
+        let repositoryTrackIDs = try await repository.fetchTrackIDs()
+        XCTAssertEqual(repositoryTrackIDs, union)
+    }
+
+    func testMuhammadHishamHasOnlyPublishedSparseSurahsAndStableTrackIDs() async throws {
+        let repository = try GRDBCatalogRepository(databaseURL: generatedCatalogURL)
+        let reciterID = "surahquran-qari-10"
+        let reciter = try await repository.fetchReciters().first { $0.id == reciterID }
+        let tracks = try await repository.fetchTracks(reciterID: reciterID)
+        let expectedNumbers = [
+            2, 12, 15, 18, 19, 26, 31, 36, 49, 50, 53, 54, 55, 56,
+            66, 67, 68, 69, 73, 75, 76, 78, 79,
+        ]
+
+        XCTAssertEqual(reciter?.nameRU, "Мухаммад Хишам")
+        XCTAssertEqual(reciter?.nameEN, "Muhammad Hisham")
+        XCTAssertEqual(tracks.map(\.surahNumber), expectedNumbers)
+        XCTAssertEqual(
+            tracks.map(\.id),
+            expectedNumbers.map { "\(reciterID)-\(String(format: "%03d", $0))" }
+        )
     }
 
     func testReadOnlyRepositoryCanOpenNonWritableCatalogWithoutChangingIt() async throws {
@@ -78,7 +104,7 @@ final class CatalogRepositoryTests: XCTestCase {
 
         let repository = try GRDBCatalogRepository(databaseURL: copiedCatalog)
         let reciters = try await repository.fetchReciters()
-        XCTAssertEqual(reciters.count, 172)
+        XCTAssertEqual(reciters.count, 173)
 
         XCTAssertEqual(try Data(contentsOf: copiedCatalog), bytesBeforeAccess)
         XCTAssertEqual(

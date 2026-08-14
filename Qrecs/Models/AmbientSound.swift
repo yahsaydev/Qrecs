@@ -9,6 +9,7 @@ enum AmbientSound: String, CaseIterable, Codable, Hashable, Identifiable, Sendab
     case birds
     case rain
     case waterfall
+    case night
 
     var id: String { rawValue }
 
@@ -18,6 +19,7 @@ enum AmbientSound: String, CaseIterable, Codable, Hashable, Identifiable, Sendab
         case .birds: "Birdsong"
         case .rain: "Rain"
         case .waterfall: "Waterfall"
+        case .night: "Night"
         }
     }
 
@@ -27,6 +29,7 @@ enum AmbientSound: String, CaseIterable, Codable, Hashable, Identifiable, Sendab
         case .birds: "Пение птиц"
         case .rain: "Дождь"
         case .waterfall: "Водопад"
+        case .night: "Ночь"
         }
     }
 
@@ -36,18 +39,25 @@ enum AmbientSound: String, CaseIterable, Codable, Hashable, Identifiable, Sendab
         case .birds: AmbientAccent(hex: 0x48A868)
         case .rain: AmbientAccent(hex: 0x59A9C9)
         case .waterfall: AmbientAccent(hex: 0x247CB3)
+        case .night: AmbientAccent(hex: 0x5B4AA8)
         }
     }
 
-    var resourceFileName: String { "\(rawValue).mp3" }
+    var resourceFileName: String { "\(rawValue).\(resourceExtension)" }
     var resourceBaseName: String { rawValue }
-    var resourceExtension: String { "mp3" }
+    var resourceExtension: String {
+        switch self {
+        case .night: "wav"
+        default: "mp3"
+        }
+    }
 
     var author: String {
         switch self {
         case .fire, .waterfall: "Nox_Sound"
         case .birds: "Magnesus"
         case .rain: "_lynks"
+        case .night: "Solar01"
         }
     }
 
@@ -57,6 +67,7 @@ enum AmbientSound: String, CaseIterable, Codable, Hashable, Identifiable, Sendab
         case .birds: URL(string: "https://freesound.org/people/Magnesus/sounds/723913/")!
         case .rain: URL(string: "https://freesound.org/people/_lynks/sounds/595717/")!
         case .waterfall: URL(string: "https://freesound.org/people/Nox_Sound/sounds/637082/")!
+        case .night: URL(string: "https://freesound.org/people/Solar01/sounds/662882/")!
         }
     }
 
@@ -66,6 +77,9 @@ enum AmbientSound: String, CaseIterable, Codable, Hashable, Identifiable, Sendab
         case .birds: URL(string: "https://cdn.freesound.org/previews/723/723913_2008500-hq.mp3")!
         case .rain: URL(string: "https://cdn.freesound.org/previews/595/595717_2530992-hq.mp3")!
         case .waterfall: URL(string: "https://cdn.freesound.org/previews/637/637082_9250976-hq.mp3")!
+        case .night:
+            // The bundled WAV was converted from the original file downloaded from this item page.
+            URL(string: "https://freesound.org/people/Solar01/sounds/662882/")!
         }
     }
 
@@ -75,6 +89,7 @@ enum AmbientSound: String, CaseIterable, Codable, Hashable, Identifiable, Sendab
         case .birds: "9aebcb869cf37040c4588fc05d72bed197951aaa1beacb6874b379c69e379dbb"
         case .rain: "c42458d0383b82d5b03e09650ae3db75368d14f51702acf28c8125a23eadfa73"
         case .waterfall: "00ea8141c0c3cfb1b24477a91ba3f949081b8deb7aac9af188645cca3bcfd7b2"
+        case .night: "9600c27a8c4f106530e53a7ca7e5af76b2cc657a366ae324ae79e68df4a7c98d"
         }
     }
 

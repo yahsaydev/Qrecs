@@ -96,4 +96,10 @@ actor GRDBCatalogRepository: CatalogRepository {
             }
         }
     }
+
+    func fetchTrackIDs() async throws -> Set<String> {
+        try await database.read { database in
+            Set(try String.fetchAll(database, sql: "SELECT id FROM tracks"))
+        }
+    }
 }

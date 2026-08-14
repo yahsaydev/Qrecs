@@ -2,7 +2,7 @@
 set -euo pipefail
 
 APP_NAME="Qrecs"
-VERSION="0.1.0"
+VERSION="0.1.1"
 MINIMUM_MACOS="15.0"
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -12,7 +12,7 @@ DERIVED_DATA="$BUILD_ROOT/DerivedData"
 STAGING_DIR="$BUILD_ROOT/staging"
 STAGED_APP="$STAGING_DIR/$APP_NAME.app"
 OUTPUT_DIR="${QRECS_RELEASE_OUTPUT_DIR:-$ROOT_DIR/dist}"
-ARCHIVE="$OUTPUT_DIR/Qrecs-0.1.0-macOS.zip"
+ARCHIVE="$OUTPUT_DIR/Qrecs-0.1.1-macOS.zip"
 CHECKSUM="$ARCHIVE.sha256"
 PACKAGE_SUPPORT_CACHE="$BUILD_ROOT/PackageCache"
 
@@ -67,6 +67,7 @@ mkdir -p "$STAGING_DIR" "$OUTPUT_DIR"
 remove_nonrelease_artifacts "$STAGED_APP"
 assert_no_nonrelease_artifacts "$STAGED_APP"
 validate_release_metadata "$STAGED_APP" "$VERSION" "$MINIMUM_MACOS"
+validate_release_icon "$STAGED_APP"
 validate_release_architectures "$STAGED_APP/Contents/MacOS/$APP_NAME" "arm64 x86_64"
 
 /usr/bin/xattr -cr "$STAGED_APP"

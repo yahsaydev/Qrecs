@@ -22,7 +22,7 @@ verify_file() {
     fi
 }
 
-NAMES=(fire birds rain waterfall)
+FILES=(fire.mp3 birds.mp3 rain.mp3 waterfall.mp3 night.wav)
 URLS=(
     "https://cdn.freesound.org/previews/558/558967_9250976-hq.mp3"
     "https://cdn.freesound.org/previews/723/723913_2008500-hq.mp3"
@@ -34,14 +34,15 @@ HASHES=(
     "9aebcb869cf37040c4588fc05d72bed197951aaa1beacb6874b379c69e379dbb"
     "c42458d0383b82d5b03e09650ae3db75368d14f51702acf28c8125a23eadfa73"
     "00ea8141c0c3cfb1b24477a91ba3f949081b8deb7aac9af188645cca3bcfd7b2"
+    "9600c27a8c4f106530e53a7ca7e5af76b2cc657a366ae324ae79e68df4a7c98d"
 )
 
 case "$MODE" in
     --verify|verify)
-        for index in "${!NAMES[@]}"; do
-            verify_file "$DESTINATION/${NAMES[$index]}.mp3" "${HASHES[$index]}"
+        for index in "${!FILES[@]}"; do
+            verify_file "$DESTINATION/${FILES[$index]}" "${HASHES[$index]}"
         done
-        echo "Verified ${#NAMES[@]} ambient assets."
+        echo "Verified ${#FILES[@]} ambient assets."
         exit 0
         ;;
     fetch)
@@ -53,22 +54,28 @@ case "$MODE" in
 esac
 
 /bin/mkdir -p "$DESTINATION"
+if [[ ! -f "$DESTINATION/night.wav" ]]; then
+    echo "error: night.wav is manually sourced from Freesound item 662882 and must already exist" >&2
+    exit 1
+fi
+verify_file "$DESTINATION/night.wav" "${HASHES[4]}"
+
 STAGING_DIR="$(/usr/bin/mktemp -d "$DESTINATION/.fetch.XXXXXX")"
 cleanup() {
     /bin/rm -rf "$STAGING_DIR"
 }
 trap cleanup EXIT
 
-for index in "${!NAMES[@]}"; do
-    staged_file="$STAGING_DIR/${NAMES[$index]}.mp3"
+for index in "${!URLS[@]}"; do
+    staged_file="$STAGING_DIR/${FILES[$index]}"
     /usr/bin/curl --fail --location --silent --show-error \
         --retry 3 --output "$staged_file" "${URLS[$index]}"
     verify_file "$staged_file" "${HASHES[$index]}"
 done
 
-for index in "${!NAMES[@]}"; do
-    /bin/chmod 0644 "$STAGING_DIR/${NAMES[$index]}.mp3"
-    /bin/mv -f "$STAGING_DIR/${NAMES[$index]}.mp3" "$DESTINATION/${NAMES[$index]}.mp3"
+for index in "${!URLS[@]}"; do
+    /bin/chmod 0644 "$STAGING_DIR/${FILES[$index]}"
+    /bin/mv -f "$STAGING_DIR/${FILES[$index]}" "$DESTINATION/${FILES[$index]}"
 done
 
-echo "Fetched and verified ${#NAMES[@]} ambient assets."
+echo "Fetched 4 remote assets and verified ${#FILES[@]} ambient assets; night.wav is manually sourced."

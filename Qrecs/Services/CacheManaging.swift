@@ -5,6 +5,7 @@ protocol CacheManaging: Sendable {
     func remove(trackID: String) async throws
     func removeAll(reciterID: String) async throws
     func clearAll() async throws
+    func reconcile(validTrackIDs: Set<String>) async throws
     func totalBytes() async throws -> Int64
     func state(trackID: String) async -> CacheDownloadState?
     func snapshot() async -> CacheSnapshot

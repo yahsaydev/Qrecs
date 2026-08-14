@@ -58,6 +58,8 @@ final class AppContainer: ObservableObject {
         let catalog = try GRDBCatalogRepository.bundled()
         let userLibrary = try GRDBUserLibraryRepository(databaseURL: paths.userDatabaseURL)
         let cache = try await CacheManager.applicationSupport(repository: userLibrary)
+        let validTrackIDs = try await catalog.fetchTrackIDs()
+        try await cache.reconcile(validTrackIDs: validTrackIDs)
         let network = NWPathNetworkMonitor()
 
         let ambientBackend: any AmbientAudioBackend
@@ -143,8 +145,7 @@ final class AppContainer: ObservableObject {
         if !isOfflineEmpty {
             await store.selectReciter("fixture-reciter")
             if hasPlaybackFailure, let track = tracks.first {
-                store.selectTrack(track)
-                player.play()
+                store.playTrack(track)
                 audio.failCurrent(message: "Fixture playback failure")
             }
         }
@@ -206,6 +207,9 @@ private actor FixtureCatalog: CatalogRepository {
     func fetchReciters() -> [Reciter] { reciters }
     func fetchSurahs() -> [Surah] { surahs }
     func fetchTracks(reciterID: String) -> [Track] { tracksByReciter[reciterID] ?? [] }
+    func fetchTrackIDs() -> Set<String> {
+        Set(tracksByReciter.values.flatMap { $0 }.map(\.id))
+    }
 }
 
 private actor FixtureUserLibrary: UserLibraryRepository {
@@ -225,6 +229,7 @@ private actor FixtureUserLibrary: UserLibraryRepository {
     func download(trackID: String) -> CachedDownload? { nil }
     func upsertDownload(_ download: CachedDownload) {}
     func removeDownload(trackID: String) {}
+    func removeDownloads(trackIDs: Set<String>) {}
     func cachedTrackIDs() -> Set<String> { [] }
     func cachedReciterIDs() -> Set<String> { [] }
     func totalDownloadedBytes() -> Int64 { 0 }
@@ -243,6 +248,7 @@ private actor FixtureCache: CacheManaging {
     func remove(trackID: String) { states.removeValue(forKey: trackID) }
     func removeAll(reciterID: String) { states.removeAll() }
     func clearAll() { states.removeAll() }
+    func reconcile(validTrackIDs: Set<String>) {}
     func totalBytes() -> Int64 { 0 }
     func state(trackID: String) -> CacheDownloadState? { states[trackID] }
     func snapshot() -> CacheSnapshot { CacheSnapshot(states: states) }

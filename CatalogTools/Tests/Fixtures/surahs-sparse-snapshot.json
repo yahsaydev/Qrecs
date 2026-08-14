@@ -1,0 +1,25 @@
+{
+  "format_version": 1,
+  "source": "surahquran",
+  "confirmed": true,
+  "reciters": [
+    {
+      "site_id": 999,
+      "source_name": "Fixture Reciter",
+      "name_ru": "Тестовый чтец",
+      "name_en": "Fixture Reciter",
+      "tracks": [
+        {"surah_number": 2, "url": "https://audio.example/999/002.mp3", "status": "available"},
+        {"surah_number": 12, "url": "https://audio.example/999/012.mp3", "status": "available"},
+        {"surah_number": 15, "url": "https://audio.example/999/015.mp3", "status": "unavailable"}
+      ]
+    },
+    {
+      "site_id": 1000,
+      "source_name": "No Confirmed Tracks",
+      "name_ru": "Нет подтвержденных записей",
+      "name_en": "No Confirmed Tracks",
+      "tracks": []
+    }
+  ]
+}

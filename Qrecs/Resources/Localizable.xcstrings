@@ -12,6 +12,7 @@
     "Cache is empty" : { "localizations" : { "ru" : { "stringUnit" : { "state" : "translated", "value" : "Кэш пуст" } } } },
     "Cached" : { "localizations" : { "ru" : { "stringUnit" : { "state" : "translated", "value" : "В кэше" } } } },
     "Cancel" : { "localizations" : { "ru" : { "stringUnit" : { "state" : "translated", "value" : "Отменить" } } } },
+    "Cancel download" : { "localizations" : { "ru" : { "stringUnit" : { "state" : "translated", "value" : "Отменить загрузку" } } } },
     "Clear all cache" : { "localizations" : { "ru" : { "stringUnit" : { "state" : "translated", "value" : "Очистить весь кэш" } } } },
     "Clear cache?" : { "localizations" : { "ru" : { "stringUnit" : { "state" : "translated", "value" : "Очистить кэш?" } } } },
     "Close" : { "localizations" : { "ru" : { "stringUnit" : { "state" : "translated", "value" : "Закрыть" } } } },

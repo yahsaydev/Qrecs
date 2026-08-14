@@ -8,3 +8,4 @@ xcuserdata/
 outputs/
 dist/
 .release-build/
+.worktrees/
