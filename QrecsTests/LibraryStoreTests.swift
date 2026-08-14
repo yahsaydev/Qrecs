@@ -42,6 +42,77 @@ final class LibraryStoreTests: XCTestCase {
         XCTAssertEqual(fixture.store.selectedTrackID, track.id)
     }
 
+    func testPlayTrackSelectsNewTrackFromZeroAndStartsPlayback() async {
+        let fixture = makeFixture(networkAvailable: true)
+        await fixture.store.start()
+        await fixture.store.selectReciter("r1")
+        fixture.store.selectTrack(fixture.store.tracks[0])
+        fixture.player.state.elapsed = 37
+        let target = fixture.store.tracks[1]
+
+        fixture.store.playTrack(target)
+
+        XCTAssertEqual(fixture.player.selectedTrack, target)
+        XCTAssertEqual(fixture.player.selectCount, 2)
+        XCTAssertEqual(fixture.player.playCount, 1)
+        XCTAssertEqual(fixture.player.state.elapsed, 0)
+        XCTAssertEqual(fixture.store.selectedTrackID, target.id)
+        XCTAssertEqual(fixture.store.playerState.status, .playing)
+    }
+
+    func testPlayTrackResumesCurrentPausedTrackWithoutReselectingOrResetting() async {
+        let fixture = makeFixture(networkAvailable: true)
+        await fixture.store.start()
+        await fixture.store.selectReciter("r1")
+        let track = fixture.store.tracks[0]
+        fixture.store.selectTrack(track)
+        fixture.player.state.elapsed = 37
+
+        fixture.store.playTrack(track)
+
+        XCTAssertEqual(fixture.player.selectCount, 1)
+        XCTAssertEqual(fixture.player.playCount, 1)
+        XCTAssertEqual(fixture.player.state.elapsed, 37)
+        XCTAssertEqual(fixture.store.playerState.status, .playing)
+    }
+
+    func testPlayTrackResumesCurrentPausedTrackAfterLibrarySelectionWasCleared() async {
+        let fixture = makeFixture(networkAvailable: true)
+        await fixture.store.start()
+        await fixture.store.selectReciter("r1")
+        let track = fixture.store.tracks[0]
+        fixture.store.selectTrack(track)
+        fixture.player.state.elapsed = 37
+
+        await fixture.store.selectReciter("r2")
+        await fixture.store.selectReciter("r1")
+        XCTAssertNil(fixture.store.selectedTrackID)
+
+        fixture.store.playTrack(track)
+
+        XCTAssertEqual(fixture.player.selectCount, 1)
+        XCTAssertEqual(fixture.player.playCount, 1)
+        XCTAssertEqual(fixture.player.state.elapsed, 37)
+        XCTAssertEqual(fixture.store.selectedTrackID, track.id)
+        XCTAssertEqual(fixture.store.playerState.status, .playing)
+    }
+
+    func testPlayTrackDoesNothingWhenCurrentTrackIsAlreadyPlaying() async {
+        let fixture = makeFixture(networkAvailable: true)
+        await fixture.store.start()
+        await fixture.store.selectReciter("r1")
+        let track = fixture.store.tracks[0]
+        fixture.store.selectTrack(track)
+        fixture.store.playPause()
+        let selectCount = fixture.player.selectCount
+        let playCount = fixture.player.playCount
+
+        fixture.store.playTrack(track)
+
+        XCTAssertEqual(fixture.player.selectCount, selectCount)
+        XCTAssertEqual(fixture.player.playCount, playCount)
+    }
+
     func testNetworkUpdatesDriveEffectiveOfflineAndPlayerWithoutPolling() async {
         let fixture = makeFixture(networkAvailable: true)
         await fixture.store.start()
@@ -104,6 +175,197 @@ final class LibraryStoreTests: XCTestCase {
 
         XCTAssertEqual(fixture.store.cacheStates[track.id], .cached(cached))
         withExtendedLifetime(cancellable) {}
+    }
+
+    func testCacheAllOwnsOnlyNewTracksAndPublishesButtonFacingCount() async {
+        let fixture = makeFixture(networkAvailable: true, r1TrackCount: 4)
+        await fixture.store.start()
+        await fixture.store.selectReciter("r1")
+        let singleTrack = fixture.store.tracks[1]
+        let batchTracks = Array(fixture.store.tracks[2...3])
+        await fixture.store.cacheTrack(singleTrack)
+
+        await fixture.store.cacheAllSelectedReciter()
+
+        let batch = try! XCTUnwrap(fixture.store.activeCacheBatch)
+        XCTAssertEqual(batch.reciterID, "r1")
+        XCTAssertEqual(batch.originalCount, 2)
+        XCTAssertEqual(batch.remainingCount, 2)
+        XCTAssertEqual(batch.remainingTrackIDs, Set(batchTracks.map(\.id)))
+        let initialCacheRequests = await fixture.cache.cacheRequestIDs()
+        XCTAssertEqual(Set(initialCacheRequests), Set([singleTrack.id] + batchTracks.map(\.id)))
+        XCTAssertEqual(initialCacheRequests.count, 3)
+
+        await fixture.store.cacheAllSelectedReciter()
+
+        XCTAssertEqual(fixture.store.activeCacheBatch?.id, batch.id)
+        let repeatedCacheRequests = await fixture.cache.cacheRequestIDs()
+        XCTAssertEqual(repeatedCacheRequests.count, 3)
+    }
+
+    func testCancelActiveBatchPreservesPreExistingSingleDownload() async {
+        let fixture = makeFixture(networkAvailable: true, r1TrackCount: 4)
+        await fixture.store.start()
+        await fixture.store.selectReciter("r1")
+        let singleTrack = fixture.store.tracks[1]
+        let batchTracks = Array(fixture.store.tracks[2...3])
+        await fixture.store.cacheTrack(singleTrack)
+        await fixture.store.cacheAllSelectedReciter()
+
+        await fixture.store.cancelActiveCacheBatch()
+
+        XCTAssertNil(fixture.store.activeCacheBatch)
+        let cancelRequests = await fixture.cache.cancelRequestIDs()
+        let singleState = await fixture.cache.state(trackID: singleTrack.id)
+        XCTAssertEqual(Set(cancelRequests), Set(batchTracks.map(\.id)))
+        XCTAssertEqual(singleState, .queued)
+    }
+
+    func testBatchIsNotCancelableUntilEveryOwnedTrackEntersCacheManager() async {
+        let fixture = makeFixture(networkAvailable: true, r1TrackCount: 3)
+        await fixture.store.start()
+        await fixture.store.selectReciter("r1")
+        let batchTrackIDs = Set(fixture.store.tracks.dropFirst().map(\.id))
+        await fixture.cache.beginControlledCacheEntries()
+
+        let preparation = Task { await fixture.store.cacheAllSelectedReciter() }
+        await fixture.cache.waitUntilControlledCacheEntryCount(batchTrackIDs.count)
+
+        XCTAssertNil(fixture.store.activeCacheBatch)
+        await fixture.store.cancelActiveCacheBatch()
+        await fixture.store.cacheAllSelectedReciter()
+        let cancelRequestsDuringPreparation = await fixture.cache.cancelRequestIDs()
+        XCTAssertEqual(cancelRequestsDuringPreparation, [])
+
+        await fixture.cache.resolveControlledCacheEntries()
+        await preparation.value
+
+        let batch = try! XCTUnwrap(fixture.store.activeCacheBatch)
+        let cacheRequests = await fixture.cache.cacheRequestIDs()
+        XCTAssertEqual(batch.remainingTrackIDs, batchTrackIDs)
+        XCTAssertEqual(Set(cacheRequests), batchTrackIDs)
+        XCTAssertEqual(cacheRequests.count, batchTrackIDs.count)
+
+        await fixture.store.cancelActiveCacheBatch()
+
+        let cancelRequests = await fixture.cache.cancelRequestIDs()
+        XCTAssertEqual(Set(cancelRequests), batchTrackIDs)
+        XCTAssertNil(fixture.store.activeCacheBatch)
+    }
+
+    func testSingleCacheRequestDuringPreparationIsIgnoredInFavorOfBatchOwnership() async {
+        let fixture = makeFixture(networkAvailable: true, r1TrackCount: 3)
+        await fixture.store.start()
+        await fixture.store.selectReciter("r1")
+        let batchTrackIDs = Set(fixture.store.tracks.dropFirst().map(\.id))
+        let overlappingTrack = fixture.store.tracks[1]
+        await fixture.cache.beginControlledCacheEntries()
+
+        let preparation = Task { await fixture.store.cacheAllSelectedReciter() }
+        await fixture.cache.waitUntilControlledCacheEntryCount(batchTrackIDs.count)
+
+        await fixture.store.cacheTrack(overlappingTrack)
+
+        let overlappingEntryCount = await fixture.cache.controlledCacheEntryCount(
+            trackID: overlappingTrack.id
+        )
+        XCTAssertEqual(overlappingEntryCount, 1)
+
+        await fixture.cache.resolveControlledCacheEntries()
+        await preparation.value
+
+        let batch = try! XCTUnwrap(fixture.store.activeCacheBatch)
+        let cacheRequests = await fixture.cache.cacheRequestIDs()
+        XCTAssertEqual(batch.remainingTrackIDs, batchTrackIDs)
+        XCTAssertEqual(Set(cacheRequests), batchTrackIDs)
+        XCTAssertEqual(cacheRequests.count, batchTrackIDs.count)
+    }
+
+    func testCancelFinishesOwnedTrackWhenCacheHasNoState() async {
+        let fixture = makeFixture(networkAvailable: true)
+        await fixture.store.start()
+        await fixture.store.selectReciter("r1")
+        await fixture.store.cacheAllSelectedReciter()
+        let ownedTrackID = try! XCTUnwrap(fixture.store.activeCacheBatch?.remainingTrackIDs.first)
+        await fixture.cache.removeState(trackID: ownedTrackID)
+
+        await fixture.store.cancelActiveCacheBatch()
+
+        XCTAssertNil(fixture.store.activeCacheBatch)
+        XCTAssertNil(fixture.store.cacheStates[ownedTrackID])
+    }
+
+    func testBatchSurvivesReciterSwitchAndTerminalEventsUpdateRemainingCount() async {
+        let fixture = makeFixture(networkAvailable: true, r1TrackCount: 4)
+        await fixture.store.start()
+        await fixture.store.selectReciter("r1")
+        await fixture.store.cacheAllSelectedReciter()
+        let batchTracks = Array(fixture.store.tracks[1...3])
+        let firstCompleted = batchTracks[0]
+        let cached = CachedDownload(
+            trackID: firstCompleted.id,
+            reciterID: firstCompleted.reciterID,
+            relativePath: "batch-one.mp3",
+            byteCount: 50,
+            etag: nil,
+            updatedAt: Date(timeIntervalSince1970: 3)
+        )
+
+        await fixture.store.selectReciter("r2")
+        XCTAssertEqual(fixture.store.activeCacheBatch?.reciterID, "r1")
+        XCTAssertEqual(fixture.store.activeCacheBatch?.remainingCount, 3)
+
+        await fixture.user.upsertDownload(cached)
+        let decremented = expectation(description: "terminal event decrements batch count")
+        let cancellable = fixture.store.$activeCacheBatch
+            .dropFirst()
+            .filter { $0?.remainingCount == 2 }
+            .prefix(1)
+            .sink { _ in decremented.fulfill() }
+        await fixture.cache.send(.cached(cached), trackID: firstCompleted.id)
+        await fulfillment(of: [decremented], timeout: 1)
+
+        XCTAssertEqual(fixture.store.selectedReciterID, "r2")
+        XCTAssertEqual(fixture.store.activeCacheBatch?.remainingCount, 2)
+        XCTAssertFalse(fixture.store.activeCacheBatch?.remainingTrackIDs.contains(firstCompleted.id) ?? true)
+        withExtendedLifetime(cancellable) {}
+    }
+
+    func testFinalCompletionRacingCancellationIsIdempotent() async {
+        let fixture = makeFixture(networkAvailable: true, r1TrackCount: 3)
+        await fixture.store.start()
+        await fixture.store.selectReciter("r1")
+        await fixture.store.cacheAllSelectedReciter()
+        let batchTracks = Array(fixture.store.tracks[1...2])
+        await fixture.cache.beginControlledCancellation()
+
+        let cancellation = Task { await fixture.store.cancelActiveCacheBatch() }
+        await fixture.cache.waitUntilCancelRequestCount(batchTracks.count)
+
+        await fixture.cache.send(.failed(message: "finished first"), trackID: batchTracks[0].id)
+        await fixture.cache.send(.failed(message: "finished second"), trackID: batchTracks[1].id)
+        let finished = expectation(description: "simultaneous terminal events finish batch")
+        if fixture.store.activeCacheBatch == nil {
+            finished.fulfill()
+        } else {
+            let cancellable = fixture.store.$activeCacheBatch
+                .dropFirst()
+                .filter { $0 == nil }
+                .prefix(1)
+                .sink { _ in finished.fulfill() }
+            await fulfillment(of: [finished], timeout: 1)
+            withExtendedLifetime(cancellable) {}
+        }
+
+        await fixture.store.cancelActiveCacheBatch()
+        await fixture.cache.resolveControlledCancellations()
+        await cancellation.value
+
+        XCTAssertNil(fixture.store.activeCacheBatch)
+        let cancelRequests = await fixture.cache.cancelRequestIDs()
+        XCTAssertEqual(Set(cancelRequests), Set(batchTracks.map(\.id)))
+        XCTAssertEqual(fixture.store.cacheStates[batchTracks[0].id], .failed(message: "finished first"))
+        XCTAssertEqual(fixture.store.cacheStates[batchTracks[1].id], .failed(message: "finished second"))
     }
 
     func testCacheCompletionRefreshesSummaryAfterSwitchingReciters() async throws {
@@ -432,7 +694,7 @@ final class LibraryStoreTests: XCTestCase {
         withExtendedLifetime(cancellable) {}
     }
 
-    private func makeFixture(networkAvailable: Bool) -> StoreFixture {
+    private func makeFixture(networkAvailable: Bool, r1TrackCount: Int = 2) -> StoreFixture {
         let base = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         let paths = try! AppPaths(baseDirectory: base)
@@ -444,10 +706,14 @@ final class LibraryStoreTests: XCTestCase {
             Surah(number: 1, nameRU: "Первая", nameEN: "First"),
             Surah(number: 2, nameRU: "Вторая", nameEN: "Second"),
         ]
-        let tracks = [
-            Track(id: "r1:1", reciterID: "r1", surahNumber: 1, url: URL(string: "https://example.com/1.mp3")!),
-            Track(id: "r1:2", reciterID: "r1", surahNumber: 2, url: URL(string: "https://example.com/2.mp3")!),
-        ]
+        let tracks = (1...r1TrackCount).map { number in
+            Track(
+                id: "r1:\(number)",
+                reciterID: "r1",
+                surahNumber: number.isMultiple(of: 2) ? 2 : 1,
+                url: URL(string: "https://example.com/\(number).mp3")!
+            )
+        }
         let secondReciterTracks = [
             Track(id: "r2:1", reciterID: "r2", surahNumber: 1, url: URL(string: "https://example.com/r2-1.mp3")!),
         ]
@@ -591,13 +857,49 @@ private actor StoreCache: CacheManaging {
     var states: [String: CacheDownloadState]
     var continuations: [String: [AsyncStream<CacheDownloadState>.Continuation]] = [:]
     var eventRequests = 0
+    var cacheRequests: [String] = []
+    var cancelRequests: [String] = []
+    var controlsCancellation = false
+    var cancellationContinuations: [CheckedContinuation<Void, Never>] = []
+    var cancelRequestWaiters: [(Int, CheckedContinuation<Void, Never>)] = []
+    var controlsCacheEntries = false
+    var controlledCacheEntryCount = 0
+    var controlledCacheEntryCountsByTrack: [String: Int] = [:]
+    var cacheEntryContinuations: [CheckedContinuation<Void, Never>] = []
+    var controlledCacheEntryWaiters: [(Int, CheckedContinuation<Void, Never>)] = []
 
     init(states: [String: CacheDownloadState]) { self.states = states }
-    func cache(track: Track) {
+    func cache(track: Track) async {
+        if controlsCacheEntries {
+            controlledCacheEntryCount += 1
+            controlledCacheEntryCountsByTrack[track.id, default: 0] += 1
+            let ready = controlledCacheEntryWaiters.filter {
+                $0.0 <= controlledCacheEntryCount
+            }
+            controlledCacheEntryWaiters.removeAll {
+                $0.0 <= controlledCacheEntryCount
+            }
+            ready.forEach { $0.1.resume() }
+            if controlledCacheEntryCountsByTrack[track.id] == 1 {
+                await withCheckedContinuation { cacheEntryContinuations.append($0) }
+            }
+        }
+        cacheRequests.append(track.id)
         states[track.id] = .queued
         continuations[track.id, default: []].forEach { $0.yield(.queued) }
     }
-    func cancel(trackID: String) {}
+    func cancel(trackID: String) async {
+        cancelRequests.append(trackID)
+        let ready = cancelRequestWaiters.filter { $0.0 <= cancelRequests.count }
+        cancelRequestWaiters.removeAll { $0.0 <= cancelRequests.count }
+        ready.forEach { $0.1.resume() }
+        if controlsCancellation {
+            await withCheckedContinuation { cancellationContinuations.append($0) }
+        }
+        guard states[trackID]?.isStoreTestInFlight == true else { return }
+        states[trackID] = .cancelled
+        continuations[trackID, default: []].forEach { $0.yield(.cancelled) }
+    }
     func retry(trackID: String) {
         states[trackID] = .queued
         continuations[trackID, default: []].forEach { $0.yield(.queued) }
@@ -608,7 +910,7 @@ private actor StoreCache: CacheManaging {
     func totalBytes() -> Int64 { 0 }
     func state(trackID: String) -> CacheDownloadState? { states[trackID] }
     func snapshot() -> CacheSnapshot { CacheSnapshot(states: states) }
-    func events(for trackID: String) -> AsyncStream<CacheDownloadState> {
+    func events(for trackID: String) async -> AsyncStream<CacheDownloadState> {
         eventRequests += 1
         let (stream, continuation) = AsyncStream.makeStream(of: CacheDownloadState.self)
         continuations[trackID, default: []].append(continuation)
@@ -620,6 +922,45 @@ private actor StoreCache: CacheManaging {
         continuations[trackID, default: []].forEach { $0.yield(state) }
     }
     func eventRequestCount() -> Int { eventRequests }
+    func cacheRequestIDs() -> [String] { cacheRequests }
+    func cancelRequestIDs() -> [String] { cancelRequests }
+    func removeState(trackID: String) { states.removeValue(forKey: trackID) }
+    func beginControlledCacheEntries() { controlsCacheEntries = true }
+    func controlledCacheEntryCount(trackID: String) -> Int {
+        controlledCacheEntryCountsByTrack[trackID, default: 0]
+    }
+    func waitUntilControlledCacheEntryCount(_ count: Int) async {
+        if controlledCacheEntryCount >= count { return }
+        await withCheckedContinuation {
+            controlledCacheEntryWaiters.append((count, $0))
+        }
+    }
+    func resolveControlledCacheEntries() {
+        controlsCacheEntries = false
+        let continuations = cacheEntryContinuations
+        cacheEntryContinuations.removeAll()
+        continuations.forEach { $0.resume() }
+    }
+    func beginControlledCancellation() { controlsCancellation = true }
+    func waitUntilCancelRequestCount(_ count: Int) async {
+        if cancelRequests.count >= count { return }
+        await withCheckedContinuation { cancelRequestWaiters.append((count, $0)) }
+    }
+    func resolveControlledCancellations() {
+        controlsCancellation = false
+        let continuations = cancellationContinuations
+        cancellationContinuations.removeAll()
+        continuations.forEach { $0.resume() }
+    }
+}
+
+private extension CacheDownloadState {
+    var isStoreTestInFlight: Bool {
+        switch self {
+        case .queued, .downloading: true
+        case .cached, .failed, .cancelled: false
+        }
+    }
 }
 
 private actor StoreNetwork: NetworkMonitoring {
@@ -652,6 +993,7 @@ private final class StorePlayer: QuranPlaying {
     var availabilityLocalURLs: [[String: URL]] = []
     var onAvailabilityUpdate: (([Track], [String: URL]) -> Void)?
     var playCount = 0
+    var selectCount = 0
     var networkAvailability: [Bool] = []
     var retryCount = 0
     func updates() -> AsyncStream<PlayerState> {
@@ -661,18 +1003,23 @@ private final class StorePlayer: QuranPlaying {
         }
     }
     func select(track: Track, queue: [Track], localURLs: [String: URL]) {
+        selectCount += 1
         selectedTrack = track
         selectedQueue = queue
         selectedLocalURLs = localURLs
         state.currentTrack = track
         state.status = .paused
+        state.elapsed = 0
     }
     func updateAvailability(queue: [Track], localURLs: [String: URL]) {
         availabilityQueues.append(queue)
         availabilityLocalURLs.append(localURLs)
         onAvailabilityUpdate?(queue, localURLs)
     }
-    func play() { playCount += 1 }
+    func play() {
+        playCount += 1
+        state.status = .playing
+    }
     func pause() {}
     func stop() {}
     func previous() {}

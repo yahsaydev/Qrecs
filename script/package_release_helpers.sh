@@ -30,6 +30,26 @@ validate_release_metadata() {
     fi
 }
 
+validate_release_icon() {
+    local app_bundle="$1"
+    local icon_name
+    local icon_path
+
+    icon_name="$(release_plist_value "$app_bundle" CFBundleIconFile 2>/dev/null || \
+        release_plist_value "$app_bundle" CFBundleIconName 2>/dev/null)" || {
+        printf 'error: missing bundle icon metadata in %s\n' "$app_bundle" >&2
+        return 1
+    }
+    case "$icon_name" in
+        *.icns) icon_path="$app_bundle/Contents/Resources/$icon_name" ;;
+        *) icon_path="$app_bundle/Contents/Resources/$icon_name.icns" ;;
+    esac
+    if [ ! -s "$icon_path" ]; then
+        printf 'error: compiled bundle icon is missing or empty: %s\n' "$icon_path" >&2
+        return 1
+    fi
+}
+
 remove_nonrelease_artifacts() {
     local app_bundle="$1"
     local artifact

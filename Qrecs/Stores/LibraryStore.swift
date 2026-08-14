@@ -8,6 +8,15 @@ enum LibraryPhase: Equatable {
     case failed(String)
 }
 
+struct CacheBatchState: Equatable, Sendable, Identifiable {
+    let id: UUID
+    let reciterID: String
+    let originalCount: Int
+    var remainingTrackIDs: Set<String>
+
+    var remainingCount: Int { remainingTrackIDs.count }
+}
+
 @MainActor
 final class LibraryStore: ObservableObject {
     @Published private(set) var phase: LibraryPhase = .idle
@@ -20,6 +29,7 @@ final class LibraryStore: ObservableObject {
     @Published private(set) var cacheGroups: [CachedDownloadGroup] = []
     @Published private(set) var totalCachedBytes: Int64 = 0
     @Published private(set) var cacheStates: [String: CacheDownloadState] = [:]
+    @Published private(set) var activeCacheBatch: CacheBatchState?
     @Published private(set) var networkAvailable = false
     @Published private(set) var playerState: PlayerState = .idle
     @Published private(set) var ambientState: AmbientMixState = .default
@@ -48,6 +58,8 @@ final class LibraryStore: ObservableObject {
     private var knownTrackReciterIDs: [String: String] = [:]
     private var tracksByReciter: [String: [Track]] = [:]
     private var cacheRefreshGeneration: UInt64 = 0
+    private var isPreparingCacheBatch = false
+    private var cancellingCacheBatchID: UUID?
     private var preferencesCancellable: AnyCancellable?
     private var manualOfflineCancellable: AnyCancellable?
 
@@ -212,6 +224,26 @@ final class LibraryStore: ObservableObject {
         playerState = player.state
     }
 
+    func playTrack(_ track: Track) {
+        guard tracks.contains(where: { $0.id == track.id }) else { return }
+        if playerState.currentTrack?.id == track.id {
+            selectedTrackID = track.id
+            switch playerState.status {
+            case .playing:
+                return
+            case .paused:
+                player.play()
+                playerState = player.state
+                return
+            case .idle, .stopped, .failed:
+                break
+            }
+        }
+        selectTrack(track)
+        player.play()
+        playerState = player.state
+    }
+
     func toggleFavorite(reciterID: String) async {
         do {
             let isFavorite = try await userLibrary.toggleFavorite(reciterID: reciterID)
@@ -226,6 +258,9 @@ final class LibraryStore: ObservableObject {
     }
 
     func cacheTrack(_ track: Track) async {
+        // Preparation owns its initial candidate set. Singles already in progress
+        // were captured before this flag was set; new single requests are ignored.
+        guard !isPreparingCacheBatch else { return }
         knownTrackReciterIDs[track.id] = track.reciterID
         cacheOperationsStarting.insert(track.id)
         await observeCacheIfNeeded(for: track)
@@ -241,8 +276,83 @@ final class LibraryStore: ObservableObject {
     }
 
     func cacheAllSelectedReciter() async {
-        for track in tracks where downloadsByTrack[track.id] == nil {
-            await cacheTrack(track)
+        guard activeCacheBatch == nil, !isPreparingCacheBatch,
+              let reciterID = selectedReciterID else { return }
+        isPreparingCacheBatch = true
+        defer { isPreparingCacheBatch = false }
+
+        let candidateTracks = tracks.filter { $0.reciterID == reciterID }
+        let snapshot = await cache.snapshot()
+        let previouslyStartedTrackIDs = Set(snapshot.states.keys)
+            .union(cacheStates.keys)
+            .union(downloadsByTrack.keys)
+            .union(cacheOperationsStarting)
+            .union(cacheObservationTasks.keys)
+        let ownedTracks = candidateTracks.filter {
+            !previouslyStartedTrackIDs.contains($0.id)
+        }
+        guard !ownedTracks.isEmpty, activeCacheBatch == nil else { return }
+
+        var scheduledTrackIDs: Set<String> = []
+        await withTaskGroup(of: (trackID: String, errorMessage: String?).self) { group in
+            for track in ownedTracks {
+                group.addTask { [cache] in
+                    do {
+                        try await cache.cache(track: track)
+                        return (track.id, nil)
+                    } catch {
+                        return (track.id, error.localizedDescription)
+                    }
+                }
+            }
+            for await result in group {
+                if let errorMessage = result.errorMessage {
+                    nonfatalError = errorMessage
+                } else {
+                    scheduledTrackIDs.insert(result.trackID)
+                }
+            }
+        }
+
+        let scheduledSnapshot = await cache.snapshot()
+        let unfinishedTrackIDs = scheduledTrackIDs.filter {
+            scheduledSnapshot.states[$0]?.isTerminal == false
+        }
+        if !unfinishedTrackIDs.isEmpty {
+            activeCacheBatch = CacheBatchState(
+                id: UUID(),
+                reciterID: reciterID,
+                originalCount: scheduledTrackIDs.count,
+                remainingTrackIDs: unfinishedTrackIDs
+            )
+        }
+
+        for track in ownedTracks where scheduledTrackIDs.contains(track.id) {
+            await observeCacheIfNeeded(for: track)
+            await synchronizeCacheState(trackID: track.id)
+        }
+    }
+
+    func cancelActiveCacheBatch() async {
+        guard let batch = activeCacheBatch,
+              cancellingCacheBatchID != batch.id else { return }
+        cancellingCacheBatchID = batch.id
+        defer {
+            if cancellingCacheBatchID == batch.id {
+                cancellingCacheBatchID = nil
+            }
+        }
+
+        await withTaskGroup(of: String.self) { group in
+            for trackID in batch.remainingTrackIDs {
+                group.addTask { [cache] in
+                    await cache.cancel(trackID: trackID)
+                    return trackID
+                }
+            }
+            for await trackID in group {
+                await synchronizeCacheState(trackID: trackID)
+            }
         }
     }
 
@@ -408,7 +518,12 @@ final class LibraryStore: ObservableObject {
     }
 
     private func synchronizeCacheState(trackID: String) async {
-        guard let state = await cache.state(trackID: trackID) else { return }
+        guard let state = await cache.state(trackID: trackID) else {
+            cacheStates.removeValue(forKey: trackID)
+            finishCacheObservation(trackID: trackID, cancelTask: true)
+            finishCacheBatchTrack(trackID)
+            return
+        }
         if await receiveCacheState(state, trackID: trackID) {
             finishCacheObservation(trackID: trackID, cancelTask: true)
         }
@@ -422,6 +537,7 @@ final class LibraryStore: ObservableObject {
         if state.isTerminal {
             guard let currentState = await cache.state(trackID: trackID) else {
                 cacheStates.removeValue(forKey: trackID)
+                finishCacheBatchTrack(trackID)
                 return true
             }
             if currentState != state {
@@ -437,6 +553,7 @@ final class LibraryStore: ObservableObject {
             guard !Task.isCancelled else { return true }
             guard let currentState = await cache.state(trackID: trackID) else {
                 cacheStates.removeValue(forKey: trackID)
+                finishCacheBatchTrack(trackID)
                 return true
             }
             if currentState != state {
@@ -444,7 +561,16 @@ final class LibraryStore: ObservableObject {
             }
         }
         cacheStates[trackID] = state
+        if state.isTerminal {
+            finishCacheBatchTrack(trackID)
+        }
         return state.isTerminal
+    }
+
+    private func finishCacheBatchTrack(_ trackID: String) {
+        guard var batch = activeCacheBatch,
+              batch.remainingTrackIDs.remove(trackID) != nil else { return }
+        activeCacheBatch = batch.remainingTrackIDs.isEmpty ? nil : batch
     }
 
     private func finishCacheObservation(trackID: String, cancelTask: Bool) {

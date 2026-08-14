@@ -4,6 +4,7 @@
 import argparse
 import csv
 import hashlib
+import json
 import os
 import re
 import sqlite3
@@ -12,6 +13,8 @@ from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlsplit
+
+from surahquran import REQUIRED_LOCALIZATIONS, resolved_reciter_id, stable_reciter_id
 
 
 EXPECTED_RECITERS = 172
@@ -305,6 +308,128 @@ def _sha256(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def _merge_confirmed_snapshot(reciters, surahs, tracks, snapshot_path):
+    try:
+        snapshot = json.loads(snapshot_path.read_text(encoding="utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise CatalogValidationError(f"{snapshot_path}: invalid UTF-8 JSON snapshot") from error
+    if snapshot.get("format_version") != 1 or snapshot.get("source") != "surahquran":
+        raise CatalogValidationError(f"{snapshot_path}: unsupported snapshot format")
+    if snapshot.get("confirmed") is not True:
+        raise CatalogValidationError(f"{snapshot_path}: snapshot must be confirmed")
+    snapshot_reciters = snapshot.get("reciters")
+    if not isinstance(snapshot_reciters, list):
+        raise CatalogValidationError(f"{snapshot_path}: reciters must be a list")
+
+    merged_reciters = list(reciters)
+    merged_tracks = list(tracks)
+    reciter_ids = {reciter.id for reciter in reciters}
+    known_surahs = {surah.number for surah in surahs}
+    logical_tracks = {(track[1], track[2]) for track in tracks}
+    logical_track_indexes = {
+        (track[1], track[2]): index for index, track in enumerate(merged_tracks)
+    }
+    seen_site_ids = set()
+
+    for index, entry in enumerate(snapshot_reciters):
+        location = f"{snapshot_path}:reciters[{index}]"
+        try:
+            site_id = int(entry["site_id"])
+            source_name = str(entry["source_name"]).strip()
+            name_ru = str(entry["name_ru"]).strip()
+            name_en = str(entry["name_en"]).strip()
+            candidate_tracks = entry["tracks"]
+        except (KeyError, TypeError, ValueError) as error:
+            raise CatalogValidationError(f"{location}: invalid reciter entry") from error
+        if site_id in seen_site_ids:
+            raise CatalogValidationError(f"{location}: duplicate site_id")
+        seen_site_ids.add(site_id)
+        if not source_name or not name_ru or not name_en or not isinstance(candidate_tracks, list):
+            raise CatalogValidationError(f"{location}: names and tracks are required")
+        required = REQUIRED_LOCALIZATIONS.get(site_id)
+        if required and (name_ru, name_en) != (required.name_ru, required.name_en):
+            raise CatalogValidationError(f"{location}: required RU/EN localization mismatch")
+
+        reciter_id = resolved_reciter_id(site_id)
+        source_stable_id = stable_reciter_id(site_id)
+        is_alias = reciter_id != source_stable_id
+        available = []
+        seen_surahs = set()
+        for track_index, track in enumerate(candidate_tracks):
+            track_location = f"{location}:tracks[{track_index}]"
+            if not isinstance(track, dict) or track.get("status") not in (
+                "available",
+                "unavailable",
+            ):
+                raise CatalogValidationError(
+                    f"{track_location}: track status must be available or unavailable"
+                )
+            try:
+                number = int(track["surah_number"])
+                url = str(track["url"]).strip()
+            except (KeyError, TypeError, ValueError) as error:
+                raise CatalogValidationError(f"{track_location}: invalid track") from error
+            if number not in known_surahs:
+                raise CatalogValidationError(f"{track_location}: unknown surah {number}")
+            if number in seen_surahs:
+                raise CatalogValidationError(f"{track_location}: duplicate logical track")
+            seen_surahs.add(number)
+            _require_https(url, track_location)
+            if track["status"] == "available":
+                available.append((number, url))
+
+        # A confirmed alias snapshot is authoritative for that source: remove
+        # the legacy track set before inserting the source's audited subset.
+        if is_alias and reciter_id in reciter_ids:
+            merged_tracks = [
+                track for track in merged_tracks if track[1] != reciter_id
+            ]
+            logical_tracks = {(track[1], track[2]) for track in merged_tracks}
+            logical_track_indexes = {
+                (track[1], track[2]): track_index
+                for track_index, track in enumerate(merged_tracks)
+            }
+            if not available:
+                merged_reciters = [
+                    reciter for reciter in merged_reciters if reciter.id != reciter_id
+                ]
+                reciter_ids.remove(reciter_id)
+                continue
+
+        # A discovered profile without a confirmed playable track is not useful
+        # to the application and must not create an empty catalog row.
+        if not available:
+            continue
+        if reciter_id not in reciter_ids:
+            first_base = available[0][1].rsplit("/", 1)[0]
+            merged_reciters.append(
+                ReciterLocalization(reciter_id, source_name, name_ru, name_en, first_base)
+            )
+            reciter_ids.add(reciter_id)
+        elif is_alias:
+            for reciter_index, existing in enumerate(merged_reciters):
+                if existing.id == reciter_id:
+                    merged_reciters[reciter_index] = ReciterLocalization(
+                        existing.id,
+                        existing.source_name_ru,
+                        name_ru,
+                        name_en,
+                        existing.url_base,
+                    )
+                    break
+        for number, url in available:
+            logical_key = (reciter_id, number)
+            if logical_key in logical_tracks:
+                continue
+            logical_tracks.add(logical_key)
+            merged_tracks.append(
+                (f"{reciter_id}-{number:03d}", reciter_id, number, url)
+            )
+            logical_track_indexes[logical_key] = len(merged_tracks) - 1
+
+    return sorted(merged_reciters, key=lambda item: item.id), sorted(merged_tracks)
+
+
 def _write_database(
     output_path,
     source_path,
@@ -314,6 +439,7 @@ def _write_database(
     surahs,
     tracks,
     removed_duplicates,
+    snapshot_path=None,
 ):
     output_path.parent.mkdir(parents=True, exist_ok=True)
     temporary_fd, temporary_name = tempfile.mkstemp(
@@ -374,6 +500,8 @@ def _write_database(
                 "surahs_sha256": _sha256(surahs_path),
                 "track_count": str(len(tracks)),
             }
+            if snapshot_path is not None:
+                metadata["crawler_snapshot_sha256"] = _sha256(snapshot_path)
             connection.executemany(
                 "INSERT INTO catalog_meta(key, value) VALUES (?, ?)",
                 sorted(metadata.items()),
@@ -410,7 +538,9 @@ def _write_database(
         raise
 
 
-def build_catalog(source_csv, reciters_csv, surahs_csv, output_database):
+def build_catalog(
+    source_csv, reciters_csv, surahs_csv, output_database, snapshot_json=None
+):
     source_path = Path(source_csv)
     reciters_path = Path(reciters_csv)
     surahs_path = Path(surahs_csv)
@@ -418,6 +548,11 @@ def build_catalog(source_csv, reciters_csv, surahs_csv, output_database):
     reciters, surahs, tracks, removed_duplicates = _validate_and_normalize(
         source_path, reciters_path, surahs_path
     )
+    snapshot_path = Path(snapshot_json) if snapshot_json is not None else None
+    if snapshot_path is not None:
+        reciters, tracks = _merge_confirmed_snapshot(
+            reciters, surahs, tracks, snapshot_path
+        )
     _write_database(
         output_path,
         source_path,
@@ -427,6 +562,7 @@ def build_catalog(source_csv, reciters_csv, surahs_csv, output_database):
         surahs,
         tracks,
         removed_duplicates,
+        snapshot_path,
     )
 
 
@@ -447,13 +583,21 @@ def main():
         default=tools_directory.parent / "Qrecs" / "Resources" / "Catalog" / "catalog.sqlite",
         type=Path,
     )
+    parser.add_argument(
+        "--snapshot",
+        type=Path,
+        help="merge an audited, confirmed crawler snapshot",
+    )
     arguments = parser.parse_args()
     build_catalog(
-        arguments.source, arguments.reciters, arguments.surahs, arguments.output
+        arguments.source,
+        arguments.reciters,
+        arguments.surahs,
+        arguments.output,
+        snapshot_json=arguments.snapshot,
     )
     print(
-        f"Built {arguments.output}: {EXPECTED_RECITERS} reciters, "
-        f"{EXPECTED_SURAHS} surahs, {EXPECTED_TRACKS} tracks"
+        f"Built {arguments.output}"
     )
 
 

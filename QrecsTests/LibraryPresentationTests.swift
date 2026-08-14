@@ -4,6 +4,64 @@ import XCTest
 
 @MainActor
 final class LibraryPresentationTests: XCTestCase {
+    func testPlaybackMotionRemainsContinuousAcrossFormerEightSecondBoundary() {
+        var motion = PlaybackMotionModel(staticPhase: 0.25)
+        motion.transition(isPlaying: true, reduceMotion: false, at: 0)
+
+        let before = motion.phase(at: 7.999, rate: 1)
+        let after = motion.phase(at: 8.001, rate: 1)
+
+        XCTAssertEqual(after - before, 0.002, accuracy: 0.000_001)
+        XCTAssertGreaterThan(after, 8)
+    }
+
+    func testPlaybackMotionFreezesAndResumesWithoutJump() {
+        var motion = PlaybackMotionModel(staticPhase: 0.25)
+        motion.transition(isPlaying: true, reduceMotion: false, at: 10)
+        motion.transition(isPlaying: false, reduceMotion: false, at: 13)
+
+        XCTAssertEqual(motion.phase(at: 80, rate: 1), 3.25, accuracy: 0.000_001)
+
+        motion.transition(isPlaying: true, reduceMotion: false, at: 80)
+        XCTAssertEqual(motion.phase(at: 80, rate: 1), 3.25, accuracy: 0.000_001)
+        XCTAssertEqual(motion.phase(at: 81, rate: 1), 4.25, accuracy: 0.000_001)
+    }
+
+    func testPlaybackMotionIsFullyStaticWithReduceMotion() {
+        var motion = PlaybackMotionModel(staticPhase: 0.25)
+        motion.transition(isPlaying: true, reduceMotion: true, at: 0)
+
+        XCTAssertEqual(motion.phase(at: 0, rate: 12), 0.25, accuracy: 0.000_001)
+        XCTAssertEqual(motion.phase(at: 10_000, rate: 12), 0.25, accuracy: 0.000_001)
+    }
+
+    func testEqualizerLevelsAreDeterministicBoundedAndPhaseDriven() {
+        let first = PlayingEqualizerModel.levels(at: 0.3)
+        let repeated = PlayingEqualizerModel.levels(at: 0.3)
+        let advanced = PlayingEqualizerModel.levels(at: 1.3)
+
+        XCTAssertEqual(first, repeated)
+        XCTAssertNotEqual(first, advanced)
+        XCTAssertEqual(first.count, 3)
+        XCTAssertTrue(first.allSatisfy { (0.2...1).contains($0) })
+    }
+
+    func testAuroraPaletteRepresentsEveryEnabledAmbientAccent() {
+        let accents = AmbientSound.allCases.map(\.accent)
+
+        let fields = AuroraPaletteModel.fieldColors(
+            enabledAccents: accents,
+            fieldCount: 6
+        )
+
+        let representedAccents = fields.compactMap { field -> AmbientAccent? in
+            guard case let .ambient(accent) = field else { return nil }
+            return accent
+        }
+        XCTAssertEqual(Set(representedAccents), Set(accents))
+        XCTAssertEqual(fields.count, 6)
+    }
+
     func testSystemLanguageUsesRussianOnlyForPrimaryRussianLanguage() {
         XCTAssertEqual(AppLanguage.system.resolve(preferredLanguages: ["ru-RU", "en"]), .russian)
         XCTAssertEqual(AppLanguage.system.resolve(preferredLanguages: ["en-RU", "ru"]), .english)

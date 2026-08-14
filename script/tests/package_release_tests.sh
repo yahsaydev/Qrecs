@@ -37,7 +37,9 @@ else
     fi
     assert_contains "$RELEASE_SCRIPT" '/usr/bin/codesign --verify --deep --strict' "release bundle signature is not deeply and strictly verified"
     assert_contains "$RELEASE_SCRIPT" 'validate_release_entitlements "$STAGED_APP"' "release packaging does not validate production entitlements"
-    assert_contains "$RELEASE_SCRIPT" 'Qrecs-0.1.0-macOS.zip' "release archive name is not pinned to v0.1.0"
+    assert_contains "$RELEASE_SCRIPT" 'VERSION="0.1.1"' "release version is not pinned to v0.1.1"
+    assert_contains "$RELEASE_SCRIPT" 'Qrecs-0.1.1-macOS.zip' "release archive name is not pinned to v0.1.1"
+    assert_contains "$RELEASE_SCRIPT" 'validate_release_icon "$STAGED_APP"' "release packaging does not validate the compiled bundle icon"
 fi
 
 if [ ! -f "$HELPERS_SCRIPT" ]; then
@@ -56,20 +58,32 @@ else
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
-<key>CFBundleShortVersionString</key><string>0.1.0</string>
+<key>CFBundleShortVersionString</key><string>0.1.1</string>
+<key>CFBundleIconFile</key><string>AppIcon</string>
 <key>LSMinimumSystemVersion</key><string>15.0</string>
 </dict></plist>
 EOF
 
-    if ! validate_release_metadata "$APP_BUNDLE" "0.1.0" "15.0" >/dev/null; then
-        fail "valid v0.1.0/macOS 15 metadata was rejected"
+    mkdir -p "$APP_BUNDLE/Contents/Resources"
+    printf 'compiled icon fixture\n' > "$APP_BUNDLE/Contents/Resources/AppIcon.icns"
+
+    if ! validate_release_metadata "$APP_BUNDLE" "0.1.1" "15.0" >/dev/null; then
+        fail "valid v0.1.1/macOS 15 metadata was rejected"
     fi
     if validate_release_metadata "$APP_BUNDLE" "0.2.0" "15.0" >/dev/null 2>&1; then
         fail "incorrect bundle version was accepted"
     fi
-    if validate_release_metadata "$APP_BUNDLE" "0.1.0" "14.0" >/dev/null 2>&1; then
+    if validate_release_metadata "$APP_BUNDLE" "0.1.1" "14.0" >/dev/null 2>&1; then
         fail "incorrect deployment target was accepted"
     fi
+    if ! validate_release_icon "$APP_BUNDLE" >/dev/null; then
+        fail "valid compiled bundle icon was rejected"
+    fi
+    rm "$APP_BUNDLE/Contents/Resources/AppIcon.icns"
+    if validate_release_icon "$APP_BUNDLE" >/dev/null 2>&1; then
+        fail "missing compiled bundle icon was accepted"
+    fi
+    printf 'compiled icon fixture\n' > "$APP_BUNDLE/Contents/Resources/AppIcon.icns"
 
     remove_nonrelease_artifacts "$APP_BUNDLE"
     if find "$APP_BUNDLE" \( -name '*.xctest' -o -name '*.debug.dylib' -o -name '*.dSYM' \) -print -quit | grep . >/dev/null; then
@@ -126,10 +140,10 @@ warning: entitlement output follows
         fail "thin release binary was accepted"
     fi
 
-    printf 'qrecs release fixture\n' > "$TEST_DIR/Qrecs-0.1.0-macOS.zip"
-    write_sha256 "$TEST_DIR/Qrecs-0.1.0-macOS.zip" "$TEST_DIR/Qrecs-0.1.0-macOS.zip.sha256"
-    expected_checksum="$(shasum -a 256 "$TEST_DIR/Qrecs-0.1.0-macOS.zip" | awk '{print $1}')  Qrecs-0.1.0-macOS.zip"
-    actual_checksum="$(tr -d '\n' < "$TEST_DIR/Qrecs-0.1.0-macOS.zip.sha256")"
+    printf 'qrecs release fixture\n' > "$TEST_DIR/Qrecs-0.1.1-macOS.zip"
+    write_sha256 "$TEST_DIR/Qrecs-0.1.1-macOS.zip" "$TEST_DIR/Qrecs-0.1.1-macOS.zip.sha256"
+    expected_checksum="$(shasum -a 256 "$TEST_DIR/Qrecs-0.1.1-macOS.zip" | awk '{print $1}')  Qrecs-0.1.1-macOS.zip"
+    actual_checksum="$(tr -d '\n' < "$TEST_DIR/Qrecs-0.1.1-macOS.zip.sha256")"
     if [ "$actual_checksum" != "$expected_checksum" ]; then
         fail "SHA-256 manifest is not deterministic or portable"
     fi

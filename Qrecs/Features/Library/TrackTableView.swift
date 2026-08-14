@@ -2,7 +2,7 @@ import SwiftUI
 
 struct TrackTableView: View {
     @ObservedObject var store: LibraryStore
-    @State private var trackSelection: String?
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var confirmReciterRemoval = false
 
     var body: some View {
@@ -15,7 +15,7 @@ struct TrackTableView: View {
                     systemImage: "waveform"
                 )
             } else {
-                Table(store.trackRows, selection: $trackSelection) {
+                Table(store.trackRows, selection: trackSelection) {
                     TableColumn(store.preferences.text("Number")) { row in
                         Text(row.track.surahNumber, format: .number)
                             .monospacedDigit()
@@ -23,8 +23,16 @@ struct TrackTableView: View {
                     .width(min: 50, ideal: 60, max: 80)
 
                     TableColumn(store.preferences.text("Surah")) { row in
-                        Text(row.surah.displayName(language: store.preferences.resolvedLanguage))
-                            .lineLimit(1)
+                        HStack(spacing: 7) {
+                            if store.playerState.currentTrack?.id == row.id {
+                                PlayingEqualizer(
+                                    isPlaying: store.playerState.status == .playing,
+                                    reduceMotion: reduceMotion
+                                )
+                            }
+                            Text(row.surah.displayName(language: store.preferences.resolvedLanguage))
+                                .lineLimit(1)
+                        }
                     }
 
                     TableColumn(store.preferences.text("Status")) { row in
@@ -38,9 +46,16 @@ struct TrackTableView: View {
                     .width(min: 44, ideal: 54, max: 70)
                 }
                 .accessibilityIdentifier("tracks.table")
-                .onChange(of: trackSelection) { _, id in
-                    guard let id, let track = store.tracks.first(where: { $0.id == id }) else { return }
-                    store.selectTrack(track)
+                .contextMenu(forSelectionType: String.self) { selection in
+                    if let track = selectedTrack(in: selection) {
+                        Button(store.preferences.text("Play")) {
+                            store.playTrack(track)
+                        }
+                    }
+                } primaryAction: { selection in
+                    if let track = selectedTrack(in: selection) {
+                        store.playTrack(track)
+                    }
                 }
             }
         }
@@ -54,6 +69,21 @@ struct TrackTableView: View {
                 Task { await store.removeCachedReciter(id) }
             }
         }
+    }
+
+    private var trackSelection: Binding<String?> {
+        Binding(
+            get: { store.selectedTrackID },
+            set: { id in
+                guard let id, let track = store.tracks.first(where: { $0.id == id }) else { return }
+                store.selectTrack(track)
+            }
+        )
+    }
+
+    private func selectedTrack(in selection: Set<String>) -> Track? {
+        guard let id = selection.first else { return nil }
+        return store.tracks.first { $0.id == id }
     }
 
     private var header: some View {
@@ -87,11 +117,24 @@ struct TrackTableView: View {
             ))
 
             Button {
-                Task { await store.cacheAllSelectedReciter() }
+                Task {
+                    if store.activeCacheBatch == nil {
+                        await store.cacheAllSelectedReciter()
+                    } else {
+                        await store.cancelActiveCacheBatch()
+                    }
+                }
             } label: {
-                Label(store.preferences.text("Cache all"), systemImage: "arrow.down.circle")
+                if let batch = store.activeCacheBatch {
+                    Label(
+                        "\(store.preferences.text("Cancel download")) (\(batch.remainingCount))",
+                        systemImage: "xmark.circle"
+                    )
+                } else {
+                    Label(store.preferences.text("Cache all"), systemImage: "arrow.down.circle")
+                }
             }
-            .disabled(store.effectiveOffline)
+            .disabled(store.effectiveOffline && store.activeCacheBatch == nil)
 
             Menu {
                 Button(store.preferences.text("Delete cached reciter"), role: .destructive) {

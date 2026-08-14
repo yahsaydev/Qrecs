@@ -1,0 +1,14 @@
+{
+  "format_version": 1,
+  "source": "surahquran",
+  "base_url": "https://surahquran.example/",
+  "list_page": "list.html",
+  "profiles": [
+    {
+      "site_id": 10,
+      "page": "qari-10.html",
+      "name_ru": "Мухаммад Хишам",
+      "name_en": "Muhammad Hisham"
+    }
+  ]
+}

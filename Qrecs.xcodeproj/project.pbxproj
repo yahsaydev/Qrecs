@@ -66,6 +66,9 @@
 		13000000000000000000000D /* TrackTableView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 23000000000000000000000D /* TrackTableView.swift */; };
 		13000000000000000000000E /* AmbientSoundsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 23000000000000000000000E /* AmbientSoundsView.swift */; };
 		13000000000000000000000F /* MiniPlayerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 23000000000000000000000F /* MiniPlayerView.swift */; };
+		E10000000000000000000001 /* PlaybackMotionModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = E20000000000000000000001 /* PlaybackMotionModel.swift */; };
+		E10000000000000000000002 /* AuroraPlayerBackground.swift in Sources */ = {isa = PBXBuildFile; fileRef = E20000000000000000000002 /* AuroraPlayerBackground.swift */; };
+		E10000000000000000000003 /* PlayingEqualizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = E20000000000000000000003 /* PlayingEqualizer.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -148,6 +151,9 @@
 		23000000000000000000000D /* TrackTableView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrackTableView.swift; sourceTree = "<group>"; };
 		23000000000000000000000E /* AmbientSoundsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AmbientSoundsView.swift; sourceTree = "<group>"; };
 		23000000000000000000000F /* MiniPlayerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MiniPlayerView.swift; sourceTree = "<group>"; };
+		E20000000000000000000001 /* PlaybackMotionModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaybackMotionModel.swift; sourceTree = "<group>"; };
+		E20000000000000000000002 /* AuroraPlayerBackground.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuroraPlayerBackground.swift; sourceTree = "<group>"; };
+		E20000000000000000000003 /* PlayingEqualizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlayingEqualizer.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -237,7 +243,9 @@
 			isa = PBXGroup;
 			children = (
 				23000000000000000000000E /* AmbientSoundsView.swift */,
+				E20000000000000000000002 /* AuroraPlayerBackground.swift */,
 				23000000000000000000000F /* MiniPlayerView.swift */,
+				E20000000000000000000003 /* PlayingEqualizer.swift */,
 			);
 			path = Player;
 			sourceTree = "<group>";
@@ -327,6 +335,7 @@
 			children = (
 				230000000000000000000006 /* Localization.swift */,
 				230000000000000000000003 /* LibraryProjection.swift */,
+				E20000000000000000000001 /* PlaybackMotionModel.swift */,
 				210000000000000000000005 /* AppPaths.swift */,
 				20000000000000000000000B /* RootConfiguration.swift */,
 			);
@@ -513,10 +522,13 @@
 			files = (
 				130000000000000000000008 /* AppContainer.swift in Sources */,
 				13000000000000000000000E /* AmbientSoundsView.swift in Sources */,
+				E10000000000000000000002 /* AuroraPlayerBackground.swift in Sources */,
 				130000000000000000000009 /* GlassSurface.swift in Sources */,
 				13000000000000000000000B /* LibraryRootView.swift in Sources */,
 				13000000000000000000000F /* MiniPlayerView.swift in Sources */,
 				13000000000000000000000A /* PlaybackCommands.swift in Sources */,
+				E10000000000000000000001 /* PlaybackMotionModel.swift in Sources */,
+				E10000000000000000000003 /* PlayingEqualizer.swift in Sources */,
 				13000000000000000000000C /* ReciterSidebarView.swift in Sources */,
 				13000000000000000000000D /* TrackTableView.swift in Sources */,
 				130000000000000000000002 /* AppSettings.swift in Sources */,
@@ -627,10 +639,11 @@
 		E00000000000000000000003 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = Qrecs/Qrecs.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 2;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -638,7 +651,7 @@
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
 				INFOPLIST_KEY_LSMinimumSystemVersion = "$(MACOSX_DEPLOYMENT_TARGET)";
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/../Frameworks";
-				MARKETING_VERSION = 0.1.0;
+				MARKETING_VERSION = 0.1.1;
 				PRODUCT_BUNDLE_IDENTIFIER = com.heezya.Qrecs;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -648,10 +661,11 @@
 		E00000000000000000000004 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = Qrecs/Qrecs.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 2;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -659,7 +673,7 @@
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
 				INFOPLIST_KEY_LSMinimumSystemVersion = "$(MACOSX_DEPLOYMENT_TARGET)";
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/../Frameworks";
-				MARKETING_VERSION = 0.1.0;
+				MARKETING_VERSION = 0.1.1;
 				PRODUCT_BUNDLE_IDENTIFIER = com.heezya.Qrecs;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;

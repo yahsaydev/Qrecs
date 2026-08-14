@@ -111,7 +111,7 @@ struct MiniPlayerView: View {
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
         .background {
-            PlayerGradientBackground(
+            AuroraPlayerBackground(
                 isPlaying: store.playerState.status == .playing,
                 enabledSounds: AmbientSound.allCases.filter {
                     store.preferences.ambientEnabled($0)
@@ -127,32 +127,5 @@ struct MiniPlayerView: View {
         guard seconds.isFinite, seconds >= 0 else { return "0:00" }
         let total = Int(seconds)
         return String(format: "%d:%02d", total / 60, total % 60)
-    }
-}
-
-private struct PlayerGradientBackground: View {
-    let isPlaying: Bool
-    let enabledSounds: [AmbientSound]
-    let reduceMotion: Bool
-
-    private var colors: [Color] {
-        [.init(red: 0.04, green: 0.40, blue: 0.29, opacity: 0.34)]
-            + enabledSounds.map { Color(ambientAccent: $0.accent).opacity(0.34) }
-            + [.clear]
-    }
-
-    var body: some View {
-        TimelineView(.animation(minimumInterval: 1 / 24, paused: !isPlaying || reduceMotion)) { context in
-            let phase = isPlaying && !reduceMotion
-                ? context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 8) / 8
-                : 0.25
-            LinearGradient(
-                colors: colors,
-                startPoint: UnitPoint(x: phase, y: 0),
-                endPoint: UnitPoint(x: 1 - phase, y: 1)
-            )
-        }
-        .allowsHitTesting(false)
-        .accessibilityHidden(true)
     }
 }
