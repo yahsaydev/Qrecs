@@ -45,12 +45,12 @@ assert_png() {
     fi
 }
 
-assert_project_setting_count 'MARKETING_VERSION = 0.1.1;' 2
+assert_project_setting_count 'MARKETING_VERSION = 0.1.2;' 2
 assert_project_setting_count 'CURRENT_PROJECT_VERSION = 2;' 2
 assert_project_setting_count 'ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;' 2
 
-if ! grep -F -- '?? "0.1.1"' "$ROOT_DIR/Qrecs/Features/Settings/SettingsView.swift" >/dev/null 2>&1; then
-    fail "Settings version fallback is not 0.1.1"
+if ! grep -F -- '?? "0.1.2"' "$ROOT_DIR/Qrecs/Features/Settings/SettingsView.swift" >/dev/null 2>&1; then
+    fail "Settings version fallback is not 0.1.2"
 fi
 
 assert_png "$DOC_ICON" 2048

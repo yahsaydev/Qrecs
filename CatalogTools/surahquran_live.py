@@ -48,7 +48,7 @@ class URLPageTransport:
     def get(self, url, timeout):
         request = Request(url, headers={
             "Accept": "text/html,application/xhtml+xml",
-            "User-Agent": "Qrecs-CatalogBuilder/0.1.1",
+            "User-Agent": "Qrecs-CatalogBuilder/0.1.2",
         })
         try:
             with urlopen(request, timeout=timeout) as response:
