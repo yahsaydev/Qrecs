@@ -8,7 +8,7 @@
 
 <p align="center">
   <a href="README.ru.md">Русский</a> ·
-  <a href="docs/releases/v0.1.1.md">v0.1.1 release</a> ·
+  <a href="docs/releases/v0.1.2.md">v0.1.2 release</a> ·
   <a href="#build-and-test">Build</a> ·
   <a href="LICENSE">License</a>
 </p>
@@ -20,19 +20,19 @@ Qrecs is built with SwiftUI, AVFoundation, and GRDB for macOS 15 and later.
 - A native library with favorite reciters, search, and sortable surah tables.
 - Streaming playback, a queue ordered by surah number, and a global mini-player.
 - User-requested offline downloads, explicit offline mode, and per-reciter or global storage cleanup.
-- Four independently mixed, gapless-looped ambient sounds: fire, birdsong, rain, and waterfall.
+- Four independently mixed, gapless-looped ambient sounds: fire, birdsong, rain, waterfall, and night.
 - English and Russian localization, System/Light/Dark appearance controls, and system Liquid Glass where supported.
 - A bundled, read-only SQLite catalog. Normal builds, tests, and app launches never crawl catalog sites or fetch catalog metadata.
 - Deterministic build-time catalog tooling that can merge an explicitly supplied, audited, confirmed SurahQuran snapshot. Reciters with sparse published selections retain only their available surahs; the app does not invent missing tracks.
 
-## Install v0.1.1
+## Install v0.1.2
 
-> **Pre-release warning:** `Qrecs-0.1.1-macOS.zip` is ad-hoc signed and not notarized. It is intended for early testing, not general distribution.
+> **Pre-release warning:** `Qrecs-0.1.2-macOS.zip` is ad-hoc signed and not notarized. It is intended for early testing, not general distribution.
 
-Download the ZIP and its `.sha256` file from the [v0.1.1 release](docs/releases/v0.1.1.md), then verify it:
+Download the ZIP and its `.sha256` file from the [v0.1.2 release](docs/releases/v0.1.2.md), then verify it:
 
 ```sh
-shasum -a 256 -c Qrecs-0.1.1-macOS.zip.sha256
+shasum -a 256 -c Qrecs-0.1.2-macOS.zip.sha256
 ```
 
 Extract the ZIP and move `Qrecs.app` to Applications. On first launch, macOS may block the unnotarized app. In Finder, right-click (or Control-click) `Qrecs.app`, choose **Open**, then confirm **Open**. Do not disable or bypass Gatekeeper.
