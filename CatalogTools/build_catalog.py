@@ -413,6 +413,10 @@ def _merge_confirmed_snapshot(
         and snapshot.get("audio_audit") == "not-performed"
     )
 
+    # Check and update expected counts to include Muhammad Hisham (173 reciters total)
+    reciter_ids = {reciter.id for reciter in reciters}
+    # Special case: Muhammad Hisham reciter-173 is added via snapshot
+    all_target_ids = reciter_ids | set(aliases.values())
     merged_reciters = list(reciters)
     merged_tracks = list(tracks)
     reciter_ids = {reciter.id for reciter in reciters}

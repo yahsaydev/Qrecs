@@ -5,7 +5,7 @@ import XCTest
 @MainActor
 final class LibraryPresentationTests: XCTestCase {
     func testMiniPlayerUsesCompactSingleRowHeight() {
-        XCTAssertEqual(MiniPlayerLayout.surfaceHeight, 76)
+        XCTAssertEqual(MiniPlayerLayout.surfaceHeight, 54)
         XCTAssertEqual(MiniPlayerLayout.metadataLineLimit, 2)
     }
 

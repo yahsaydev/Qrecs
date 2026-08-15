@@ -13,29 +13,121 @@
       "source_name": "Мухаммад Хишам",
       "stable_id": "surahquran-qari-10",
       "tracks": [
-        {"status": "source-page-confirmed", "surah_number": 2, "url": "https://ia801405.us.archive.org/31/items/002_20221105_20221105_1355/002.mp3"},
-        {"status": "source-page-confirmed", "surah_number": 12, "url": "https://ia801405.us.archive.org/31/items/002_20221105_20221105_1355/012.mp3"},
-        {"status": "source-page-confirmed", "surah_number": 15, "url": "https://ia801405.us.archive.org/31/items/002_20221105_20221105_1355/015.mp3"},
-        {"status": "source-page-confirmed", "surah_number": 18, "url": "https://ia801405.us.archive.org/31/items/002_20221105_20221105_1355/018.mp3"},
-        {"status": "source-page-confirmed", "surah_number": 19, "url": "https://ia801405.us.archive.org/31/items/002_20221105_20221105_1355/019.mp3"},
-        {"status": "source-page-confirmed", "surah_number": 26, "url": "https://ia801405.us.archive.org/31/items/002_20221105_20221105_1355/026.mp3"},
-        {"status": "source-page-confirmed", "surah_number": 31, "url": "https://ia801405.us.archive.org/31/items/002_20221105_20221105_1355/031.mp3"},
-        {"status": "source-page-confirmed", "surah_number": 36, "url": "https://ia801405.us.archive.org/31/items/002_20221105_20221105_1355/036.mp3"},
-        {"status": "source-page-confirmed", "surah_number": 49, "url": "https://ia801405.us.archive.org/31/items/002_20221105_20221105_1355/049.mp3"},
-        {"status": "source-page-confirmed", "surah_number": 50, "url": "https://ia801405.us.archive.org/31/items/002_20221105_20221105_1355/050.mp3"},
-        {"status": "source-page-confirmed", "surah_number": 53, "url": "https://ia801405.us.archive.org/31/items/002_20221105_20221105_1355/053.mp3"},
-        {"status": "source-page-confirmed", "surah_number": 54, "url": "https://ia801405.us.archive.org/31/items/002_20221105_20221105_1355/054.mp3"},
-        {"status": "source-page-confirmed", "surah_number": 55, "url": "https://ia801405.us.archive.org/31/items/002_20221105_20221105_1355/055.mp3"},
-        {"status": "source-page-confirmed", "surah_number": 56, "url": "https://ia801405.us.archive.org/31/items/002_20221105_20221105_1355/056.mp3"},
-        {"status": "source-page-confirmed", "surah_number": 66, "url": "https://ia801405.us.archive.org/31/items/002_20221105_20221105_1355/066.mp3"},
-        {"status": "source-page-confirmed", "surah_number": 67, "url": "https://ia801405.us.archive.org/31/items/002_20221105_20221105_1355/067.mp3"},
-        {"status": "source-page-confirmed", "surah_number": 68, "url": "https://ia801405.us.archive.org/31/items/002_20221105_20221105_1355/068.mp3"},
-        {"status": "source-page-confirmed", "surah_number": 69, "url": "https://ia801405.us.archive.org/31/items/002_20221105_20221105_1355/069.mp3"},
-        {"status": "source-page-confirmed", "surah_number": 73, "url": "https://ia801405.us.archive.org/31/items/002_20221105_20221105_1355/073.mp3"},
-        {"status": "source-page-confirmed", "surah_number": 75, "url": "https://ia801405.us.archive.org/31/items/002_20221105_20221105_1355/075.mp3"},
-        {"status": "source-page-confirmed", "surah_number": 76, "url": "https://ia801405.us.archive.org/31/items/002_20221105_20221105_1355/076.mp3"},
-        {"status": "source-page-confirmed", "surah_number": 78, "url": "https://ia801405.us.archive.org/31/items/002_20221105_20221105_1355/078.mp3"},
-        {"status": "source-page-confirmed", "surah_number": 79, "url": "https://ia801405.us.archive.org/31/items/002_20221105_20221105_1355/079.mp3"}
+        {
+          "status": "source-page-confirmed",
+          "surah_number": 2,
+          "url": "https://ia801405.us.archive.org/31/items/002_20221105_20221105_1355/002.mp3"
+        },
+        {
+          "status": "source-page-confirmed",
+          "surah_number": 12,
+          "url": "https://ia801405.us.archive.org/31/items/002_20221105_20221105_1355/012.mp3"
+        },
+        {
+          "status": "source-page-confirmed",
+          "surah_number": 15,
+          "url": "https://ia801405.us.archive.org/31/items/002_20221105_20221105_1355/015.mp3"
+        },
+        {
+          "status": "source-page-confirmed",
+          "surah_number": 18,
+          "url": "https://ia801405.us.archive.org/31/items/002_20221105_20221105_1355/018.mp3"
+        },
+        {
+          "status": "source-page-confirmed",
+          "surah_number": 19,
+          "url": "https://ia801405.us.archive.org/31/items/002_20221105_20221105_1355/019.mp3"
+        },
+        {
+          "status": "source-page-confirmed",
+          "surah_number": 26,
+          "url": "https://ia801405.us.archive.org/31/items/002_20221105_20221105_1355/026.mp3"
+        },
+        {
+          "status": "source-page-confirmed",
+          "surah_number": 31,
+          "url": "https://ia801405.us.archive.org/31/items/002_20221105_20221105_1355/031.mp3"
+        },
+        {
+          "status": "source-page-confirmed",
+          "surah_number": 36,
+          "url": "https://ia801405.us.archive.org/31/items/002_20221105_20221105_1355/036.mp3"
+        },
+        {
+          "status": "source-page-confirmed",
+          "surah_number": 49,
+          "url": "https://ia801405.us.archive.org/31/items/002_20221105_20221105_1355/049.mp3"
+        },
+        {
+          "status": "source-page-confirmed",
+          "surah_number": 50,
+          "url": "https://ia801405.us.archive.org/31/items/002_20221105_20221105_1355/050.mp3"
+        },
+        {
+          "status": "source-page-confirmed",
+          "surah_number": 53,
+          "url": "https://ia801405.us.archive.org/31/items/002_20221105_20221105_1355/053.mp3"
+        },
+        {
+          "status": "source-page-confirmed",
+          "surah_number": 54,
+          "url": "https://ia801405.us.archive.org/31/items/002_20221105_20221105_1355/054.mp3"
+        },
+        {
+          "status": "source-page-confirmed",
+          "surah_number": 55,
+          "url": "https://ia801405.us.archive.org/31/items/002_20221105_20221105_1355/055.mp3"
+        },
+        {
+          "status": "source-page-confirmed",
+          "surah_number": 56,
+          "url": "https://ia801405.us.archive.org/31/items/002_20221105_20221105_1355/056.mp3"
+        },
+        {
+          "status": "source-page-confirmed",
+          "surah_number": 66,
+          "url": "https://ia801405.us.archive.org/31/items/002_20221105_20221105_1355/066.mp3"
+        },
+        {
+          "status": "source-page-confirmed",
+          "surah_number": 67,
+          "url": "https://ia801405.us.archive.org/31/items/002_20221105_20221105_1355/067.mp3"
+        },
+        {
+          "status": "source-page-confirmed",
+          "surah_number": 68,
+          "url": "https://ia801405.us.archive.org/31/items/002_20221105_20221105_1355/068.mp3"
+        },
+        {
+          "status": "source-page-confirmed",
+          "surah_number": 69,
+          "url": "https://ia801405.us.archive.org/31/items/002_20221105_20221105_1355/069.mp3"
+        },
+        {
+          "status": "source-page-confirmed",
+          "surah_number": 73,
+          "url": "https://ia801405.us.archive.org/31/items/002_20221105_20221105_1355/073.mp3"
+        },
+        {
+          "status": "source-page-confirmed",
+          "surah_number": 75,
+          "url": "https://ia801405.us.archive.org/31/items/002_20221105_20221105_1355/075.mp3"
+        },
+        {
+          "status": "source-page-confirmed",
+          "surah_number": 76,
+          "url": "https://ia801405.us.archive.org/31/items/002_20221105_20221105_1355/076.mp3"
+        },
+        {
+          "status": "source-page-confirmed",
+          "surah_number": 78,
+          "url": "https://ia801405.us.archive.org/31/items/002_20221105_20221105_1355/078.mp3"
+        },
+        {
+          "status": "source-page-confirmed",
+          "surah_number": 79,
+          "url": "https://ia801405.us.archive.org/31/items/002_20221105_20221105_1355/079.mp3"
+        }
       ]
     }
   ],

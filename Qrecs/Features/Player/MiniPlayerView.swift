@@ -14,7 +14,7 @@ enum AuroraParallaxAnimationPolicy {
 }
 
 enum MiniPlayerLayout {
-    static let surfaceHeight: CGFloat = 76
+    static let surfaceHeight: CGFloat = 54
     static let metadataLineLimit = 2
 }
 
@@ -48,8 +48,8 @@ struct MiniPlayerView: View {
             reduceMotion: reduceMotion,
             pointerOffset: parallax.pointerOffset
         ) {
-            HStack(spacing: 14) {
-                VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 10) {
+                VStack(alignment: .leading, spacing: 0) {
                     Text(
                         currentSurah?.displayName(
                             language: store.preferences.resolvedLanguage
@@ -151,7 +151,7 @@ struct MiniPlayerView: View {
                 }
             }
             .padding(.horizontal, 14)
-            .padding(.vertical, 12)
+            .padding(.vertical, 6)
             .contentShape(Rectangle())
             .onGeometryChange(for: CGSize.self) { proxy in
                 proxy.size

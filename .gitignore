@@ -1,11 +1,33 @@
+# Xcode
 DerivedData/
+*.moved-aside
+*.xcuserstate
+xcuserdata/
+
+# Build and Cache
 .build-cache/
 .build/
-.DS_Store
-xcuserdata/
-*.xcuserstate
-.superpowers/
-outputs/
-dist/
 .release-build/
+dist/
+outputs/
+
+# macOS
+.DS_Store
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+ENV/
+
+# Agent and IDE config
+.superpowers/
+.opencode/
+.serena/
+AGENTS.md
+.codex/
+
+# Other
 .worktrees/
